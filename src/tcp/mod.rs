@@ -26,11 +26,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![warn(missing_docs)]
+//! TCP network utilities.
 
-//! Network utilities using tokio async runtime for use in BP3D software.
+#[cfg(feature = "tcp-client")]
+pub mod client;
 
-pub mod tcp;
+#[cfg(feature = "tcp-server")]
+pub mod server;
 
-mod util;
+#[cfg(any(feature = "tcp-client", feature = "tcp-server"))]
+pub mod util;

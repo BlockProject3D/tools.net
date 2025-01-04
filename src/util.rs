@@ -26,11 +26,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![warn(missing_docs)]
+use tokio::sync::Semaphore;
 
-//! Network utilities using tokio async runtime for use in BP3D software.
+#[derive(Clone, Debug)]
+pub struct DataMsg {
+    pub synchro: *const Semaphore,
+    pub buffer: *const u8,
+    pub buffer_size: usize,
+    pub net_id: usize
+}
 
-pub mod tcp;
-
-mod util;
+unsafe impl Send for DataMsg {}
