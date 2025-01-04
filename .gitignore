@@ -1,0 +1,14 @@
+# Binary directory
+target
+
+# Temporary CI file
+versionfile.txt
+
+# IDE files
+.idea
+.vscode
+
+# Apple specific
+.DS_Store
+.AppleDouble
+.LSOverride
