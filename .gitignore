@@ -12,3 +12,6 @@ versionfile.txt
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Causes git conflicts sometimes.
+Cargo.lock

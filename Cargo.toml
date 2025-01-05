@@ -1,23 +1,2 @@
-[package]
-name = "bp3d-net"
-version = "1.0.0-rc.1.0.0"
-authors = ["Yuri Edward <yuri6037@outlook.com>"]
-edition = "2021"
-description = "Network utilities."
-license = "BSD-3-Clause"
-repository = "https://github.com/BlockProject3D/tools.net"
-readme = "./README.MD"
-keywords = ["bp3d", "network", "utilities"]
-categories = ["asynchronous", "network-programming"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-bp3d-debug = "1.0.0-rc.6.1.0"
-tokio = { version = "1.42.0", optional = true }
-
-[features]
-tcp-server = ["tokio", "tokio/net", "tokio/sync", "tokio/io-util", "tokio/macros", "tokio/rt"]
-tcp-client = ["tokio", "tokio/net", "tokio/sync", "tokio/io-util", "tokio/macros", "tokio/rt"]
-udp-server = ["tokio", "tokio/net", "tokio/sync", "tokio/macros", "tokio/rt"]
-udp-client = ["tokio", "tokio/net", "tokio/sync", "tokio/macros", "tokio/rt"]
+[workspace]
+members = ["core"]
