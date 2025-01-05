@@ -29,7 +29,6 @@
 //! A basic UDP server implementation with support for receiving datagrams in loop.
 
 use std::future::Future;
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::select;
@@ -37,7 +36,6 @@ use tokio::sync::watch;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::task::JoinHandle;
-use crate::udp::util::Datagram;
 
 /// A trait which represents the main server event handler.
 pub trait Handler {
@@ -48,41 +46,41 @@ pub trait Handler {
     ///
     /// # Arguments
     ///
-    /// * `server`: an instance of the server which the socket is attached to.
+    /// * `client`: an instance of the server which the socket is attached to.
     /// * `datagram`: the received datagram.
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
-    fn recv(&mut self, server: &Server<Self::Event>, datagram: Datagram) -> impl Future<Output = std::io::Result<()>> + Send;
+    fn recv(&mut self, client: &Client<Self::Event>, datagram: &[u8]) -> impl Future<Output = std::io::Result<()>> + Send;
 
     /// Called when an event was received by the server.
     ///
     /// # Arguments
     ///
-    /// * `server`: the server which received the event.
+    /// * `client`: the client which received the event.
     /// * `event`: the received event.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn event(&mut self, _: &Server<Self::Event>, _: Self::Event) -> impl Future<Output = ()> + Send {
+    fn event(&mut self, _: &Client<Self::Event>, _: Self::Event) -> impl Future<Output = ()> + Send {
         async move { }
     }
 }
 
-struct ServerTask<H: Handler, const N: usize> {
-    server: Arc<Server<H::Event>>,
+struct ClientTask<H: Handler, const N: usize> {
+    server: Arc<Client<H::Event>>,
     exit_receiver: watch::Receiver<()>,
     event_receiver: mpsc::Receiver<H::Event>,
     buffer: [u8; N],
     handler: H
 }
 
-impl<H: Handler + Send + 'static, const N: usize> ServerTask<H, N> {
+impl<H: Handler + Send + 'static, const N: usize> ClientTask<H, N> {
     pub async fn run(mut self) -> std::io::Result<()> {
         loop {
             select! {
                 _ = self.exit_receiver.changed() => break,
-                res = self.server.socket.recv_from(&mut self.buffer) => {
-                    let (len, addr) = res?;
-                    self.handler.recv(&self.server, Datagram::new(addr, &self.buffer[..len])).await?;
+                res = self.server.socket.recv(&mut self.buffer) => {
+                    let len = res?;
+                    self.handler.recv(&self.server, &self.buffer[..len]).await?;
                 },
                 Some(event) = self.event_receiver.recv() => self.handler.event(&self.server, event).await
             }
@@ -122,59 +120,32 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
         self
     }
 
-    /// Bind to ANY IP v4 addresses on the specified port.
+    /// Connect to the server at the specified address.
     ///
-    /// # Arguments
-    ///
-    /// * `port`: the port to listen on.
-    ///
-    /// returns: Result<ServerApp<H::Event>, Error>
-    ///
-    /// # Errors
-    ///
-    /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<H::Event>> {
-        self.bind((Ipv4Addr::UNSPECIFIED, port)).await
-    }
-
-    /// Bind to localhost on the specified port.
-    ///
-    /// # Arguments
-    ///
-    /// * `port`: the port to listen on.
-    ///
-    /// returns: Result<ServerApp<H::Event>, Error>
-    ///
-    /// # Errors
-    ///
-    /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<H::Event>> {
-        self.bind((Ipv4Addr::LOCALHOST, port)).await
-    }
-
-    /// Bind to an address.
+    /// Warning: as UDP does not have a concept of connection, there is no guarantee that a success
+    /// return of this function means the other peer will receive the datagrams at all.
     ///
     /// # Arguments
     ///
     /// * `addr`: the address to bind to.
     ///
-    /// returns: Result<ServerApp<H::Event>, Error>
+    /// returns: Result<ClientApp<H::Event>, Error>
     ///
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<H::Event>> {
+    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<H::Event>> {
         let socket = UdpSocket::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
         let (event_sender, event_receiver) = mpsc::channel(self.event_queue_size);
-        let server = Arc::new(Server {
+        let server = Arc::new(Client {
             socket,
             exit: exit_sender,
             event_sender
         });
         let motherfuckingrust = server.clone();
         let handle = tokio::spawn(async move {
-            let task = ServerTask {
+            let task = ClientTask {
                 server,
                 exit_receiver,
                 event_receiver,
@@ -183,22 +154,22 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
             };
             task.run().await
         });
-        Ok(ServerApp {
-            server: motherfuckingrust,
+        Ok(ClientApp {
+            client: motherfuckingrust,
             handle
         })
     }
 }
 
-/// Represents a running server.
-pub struct Server<E> {
+/// Represents a running client.
+pub struct Client<E> {
     socket: UdpSocket,
     exit: watch::Sender<()>,
     event_sender: mpsc::Sender<E>
 }
 
-impl<E> Server<E> {
-    /// Requests exit of the server.
+impl<E> Client<E> {
+    /// Requests exit of the client.
     pub fn exit(&self) {
         let _ = self.exit.send(());
     }
@@ -234,30 +205,29 @@ impl<E> Server<E> {
         self.event_sender.try_send(event)
     }
 
-    /// Send a datagram to a peer from this server socket.
+    /// Send a datagram to the server.
     ///
     /// # Arguments
     ///
-    /// * `peer_addr`: the address of the peer intended to receive the datagram.
     /// * `data`: the data to send.
     ///
     /// returns: Result<usize, Error>
-    pub async fn send(&self, peer_addr: impl ToSocketAddrs, data: &[u8]) -> std::io::Result<usize> {
-        self.socket.send_to(data, peer_addr).await
+    pub async fn send(&self, data: &[u8]) -> std::io::Result<usize> {
+        self.socket.send(data).await
     }
 }
 
 /// Represents a server application.
-pub struct ServerApp<E> {
-    server: Arc<Server<E>>,
+pub struct ClientApp<E> {
+    client: Arc<Client<E>>,
     handle: JoinHandle<std::io::Result<()>>
 }
 
-impl<E> ServerApp<E> {
-    /// Join and waits for the server to stop.
+impl<E> ClientApp<E> {
+    /// Join and waits for the client to stop.
     ///
     /// Warning: this does not automatically exit the server and will wait for a future call to the
-    /// [Server::exit] function before returning.
+    /// [Client::exit] function before returning.
     pub async fn join(self) -> std::io::Result<()> {
         self.handle.await?
     }

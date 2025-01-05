@@ -29,6 +29,7 @@
 use tokio::sync::Semaphore;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct DataMsg {
     pub synchro: *const Semaphore,
     pub buffer: *const u8,

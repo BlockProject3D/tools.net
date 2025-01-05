@@ -31,8 +31,6 @@
 
 //! Network utilities using tokio async runtime for use in BP3D software.
 
-//TODO: Implement UdpSocket following the same design pattern as TcpClient except using bind and connect.
-// where bind is used to listen with recvfrom over a socket while connect only allows recv from the same endpoint
 pub mod tcp;
 
 mod util;
