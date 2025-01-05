@@ -26,15 +26,43 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![warn(missing_docs)]
+//! Utility module for UDP client or server.
 
-//! Network utilities using tokio async runtime for use in BP3D software.
+use std::net::SocketAddr;
+use std::ops::Deref;
 
-//TODO: Implement UdpSocket following the same design pattern as TcpClient except using bind and connect.
-// where bind is used to listen with recvfrom over a socket while connect only allows recv from the same endpoint
-pub mod tcp;
+/// An UDP datagram.
+pub struct Datagram<'a> {
+    peer_addr: SocketAddr,
+    buffer: &'a [u8]
+}
 
-mod util;
+impl<'a> Datagram<'a> {
+    /// Creates a new [Datagram].
+    ///
+    /// # Arguments
+    ///
+    /// * `peer_addr`: the address of the peer this datagram comes from or is intended for.
+    /// * `buffer`: the data buffer.
+    ///
+    /// returns: Datagram
+    pub fn new(peer_addr: SocketAddr, buffer: &'a [u8]) -> Self {
+        Self {
+            peer_addr,
+            buffer
+        }
+    }
 
-pub mod udp;
+    /// Returns the address of the peer this datagram comes from or is intended for.
+    pub fn peer_addr(&self) -> &SocketAddr {
+        &self.peer_addr
+    }
+}
+
+impl<'a> Deref for Datagram<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.buffer
+    }
+}

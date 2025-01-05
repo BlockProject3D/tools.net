@@ -26,15 +26,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![warn(missing_docs)]
+//! UDP network utilities.
 
-//! Network utilities using tokio async runtime for use in BP3D software.
+#[cfg(feature = "udp-server")]
+pub mod server;
 
-//TODO: Implement UdpSocket following the same design pattern as TcpClient except using bind and connect.
-// where bind is used to listen with recvfrom over a socket while connect only allows recv from the same endpoint
-pub mod tcp;
-
-mod util;
-
-pub mod udp;
+#[cfg(any(feature = "udp-client", feature = "udp-server"))]
+pub mod util;

@@ -177,7 +177,6 @@ impl<F> Builder<F> {
         }
     }
 
-
     /// Sets the maximum number of clients allowed at the same time.
     ///
     /// The default is 4.
@@ -401,7 +400,7 @@ pub struct ServerApp<E> {
 impl<E> ServerApp<E> {
     /// Join and waits for the server to stop.
     ///
-    /// Warning this does not automatically exit the server and will wait for a future call to the
+    /// Warning: this does not automatically exit the server and will wait for a future call to the
     /// [Server::exit] function before returning.
     pub async fn join(self) -> std::io::Result<()> {
         self.handle.await?

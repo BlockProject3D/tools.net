@@ -188,7 +188,7 @@ pub struct Client<E> {
 }
 
 impl<E> Client<E> {
-    /// Requests exit of the server.
+    /// Requests exit of the client.
     pub fn exit(&self) {
         let _ = self.exit.send(());
     }
