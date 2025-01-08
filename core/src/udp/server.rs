@@ -36,7 +36,6 @@ use tokio::select;
 use tokio::sync::watch;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::task::JoinHandle;
 use crate::udp::util::Datagram;
 
 /// A trait which represents the main server event handler.
@@ -269,42 +268,5 @@ impl<E, E2> Server<E, E2> {
     }
 }
 
-/// Represents a server application.
-pub struct ServerApp<E, E2> {
-    server: Arc<Server<E, E2>>,
-    handle: JoinHandle<std::io::Result<()>>,
-    reply_receiver: mpsc::Receiver<E2>
-}
-
-impl<E, E2> ServerApp<E, E2> {
-    /// Join and waits for the server to stop.
-    ///
-    /// Warning: this does not automatically exit the server and will wait for a future call to the
-    /// [Server::exit] function before returning.
-    pub async fn join(self) -> std::io::Result<()> {
-        self.handle.await?
-    }
-
-    /// Returns the underlying server.
-    pub fn server(&self) -> &Arc<Server<E, E2>> {
-        &self.server
-    }
-
-    /// Receive an event from the main server event handler from asynchronous code.
-    ///
-    /// Returns None when the channel is closed.
-    ///
-    /// returns: Option<E>
-    pub async fn get_reply_async(&mut self) -> Option<E2> {
-        self.reply_receiver.recv().await
-    }
-
-    /// Receive an event from the main server event handler from synchronous code.
-    ///
-    /// Returns None when the channel is closed or empty.
-    ///
-    /// returns: Option<E>
-    pub fn get_reply(&mut self) -> Option<E2> {
-        self.reply_receiver.try_recv().ok()
-    }
-}
+/// The main server application type.
+pub type ServerApp<E, E2> = crate::util::ServerApp<Server<E, E2>, E2>;

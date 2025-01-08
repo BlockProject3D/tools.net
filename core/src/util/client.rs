@@ -26,15 +26,46 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tokio::sync::Semaphore;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct DataMsg {
-    pub synchro: *const Semaphore,
-    pub buffer: *const u8,
-    pub buffer_size: usize,
-    pub net_id: usize
+/// Represents a client application.
+pub struct ClientApp<Client, Reply> {
+    pub(crate) handle: JoinHandle<std::io::Result<()>>,
+    pub(crate) client: Arc<Client>,
+    pub(crate) reply_receiver: mpsc::Receiver<Reply>
 }
 
-unsafe impl Send for DataMsg {}
+impl<Client, Reply> ClientApp<Client, Reply> {
+    /// Join and waits for the client to stop.
+    ///
+    /// Warning this does not automatically exit the client and will wait for a future call to the
+    /// [Client::exit] function before returning.
+    pub async fn join(self) -> std::io::Result<()> {
+        self.handle.await?
+    }
+
+    /// Returns the underlying client.
+    pub fn client(&self) -> &Arc<Client> {
+        &self.client
+    }
+
+    /// Receive an event from the main client event handler from asynchronous code.
+    ///
+    /// Returns None when the channel is closed.
+    ///
+    /// returns: Option<E>
+    pub async fn get_reply_async(&mut self) -> Option<Reply> {
+        self.reply_receiver.recv().await
+    }
+
+    /// Receive an event from the main client event handler from synchronous code.
+    ///
+    /// Returns None when the channel is closed or empty.
+    ///
+    /// returns: Option<E>
+    pub fn get_reply(&mut self) -> Option<Reply> {
+        self.reply_receiver.try_recv().ok()
+    }
+}

@@ -36,9 +36,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::task::JoinHandle;
-use crate::tcp::util::Network;
-use crate::util::DataMsg;
+use crate::tcp::util::{DataMsg, Network};
 
 /// Represents the main event handler for a TCP client.
 pub trait Handler {
@@ -272,42 +270,5 @@ impl<E, E2> Client<E, E2> {
     }
 }
 
-/// Represents a client application.
-pub struct ClientApp<E, E2> {
-    handle: JoinHandle<std::io::Result<()>>,
-    client: Arc<Client<E, E2>>,
-    reply_receiver: mpsc::Receiver<E2>
-}
-
-impl<E, E2> ClientApp<E, E2> {
-    /// Join and waits for the client to stop.
-    ///
-    /// Warning this does not automatically exit the client and will wait for a future call to the
-    /// [Client::exit] function before returning.
-    pub async fn join(self) -> std::io::Result<()> {
-        self.handle.await?
-    }
-
-    /// Returns the underlying client.
-    pub fn client(&self) -> &Arc<Client<E, E2>> {
-        &self.client
-    }
-
-    /// Receive an event from the main client event handler from asynchronous code.
-    ///
-    /// Returns None when the channel is closed.
-    ///
-    /// returns: Option<E>
-    pub async fn get_reply_async(&mut self) -> Option<E2> {
-        self.reply_receiver.recv().await
-    }
-
-    /// Receive an event from the main client event handler from synchronous code.
-    ///
-    /// Returns None when the channel is closed or empty.
-    ///
-    /// returns: Option<E>
-    pub fn get_reply(&mut self) -> Option<E2> {
-        self.reply_receiver.try_recv().ok()
-    }
-}
+/// The main client application type.
+pub type ClientApp<E, E2> = crate::util::ClientApp<Client<E, E2>, E2>;

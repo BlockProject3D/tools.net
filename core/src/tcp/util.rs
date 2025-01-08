@@ -36,6 +36,19 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter, Inter
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
+use tokio::sync::Semaphore;
+
+#[derive(Clone, Debug)]
+pub(super) struct DataMsg {
+    pub(super) synchro: *const Semaphore,
+    pub(super) buffer: *const u8,
+    pub(super) buffer_size: usize,
+    #[allow(dead_code)]
+    pub(super) net_id: usize
+}
+
+unsafe impl Send for DataMsg {}
+
 /// Buffered reader/writer for a TCP stream.
 ///
 /// Warning: all reads and writes are buffered so make sure to call flush to actually write data.

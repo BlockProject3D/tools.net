@@ -39,10 +39,9 @@ use tokio::sync::{watch, Semaphore};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinSet;
 use crate::tcp::server::client::ClientTask;
-use crate::tcp::util::Network;
-use crate::util::DataMsg;
+use crate::tcp::util::{DataMsg, Network};
 
 /// A factory trait which can be used to create the instance of the main server event handler.
 pub trait Factory {
@@ -413,42 +412,5 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     }
 }
 
-/// Represents a server application.
-pub struct ServerApp<E, E2> {
-    handle: JoinHandle<std::io::Result<()>>,
-    server: Arc<Server<E, E2>>,
-    reply_receiver: mpsc::Receiver<E2>
-}
-
-impl<E, E2> ServerApp<E, E2> {
-    /// Join and waits for the server to stop.
-    ///
-    /// Warning: this does not automatically exit the server and will wait for a future call to the
-    /// [Server::exit] function before returning.
-    pub async fn join(self) -> std::io::Result<()> {
-        self.handle.await?
-    }
-
-    /// Returns the underlying server.
-    pub fn server(&self) -> &Arc<Server<E, E2>> {
-        &self.server
-    }
-
-    /// Receive an event from the main server event handler from asynchronous code.
-    ///
-    /// Returns None when the channel is closed.
-    ///
-    /// returns: Option<E>
-    pub async fn get_reply_async(&mut self) -> Option<E2> {
-        self.reply_receiver.recv().await
-    }
-
-    /// Receive an event from the main server event handler from synchronous code.
-    ///
-    /// Returns None when the channel is closed or empty.
-    ///
-    /// returns: Option<E>
-    pub fn get_reply(&mut self) -> Option<E2> {
-        self.reply_receiver.try_recv().ok()
-    }
-}
+/// The main server application type.
+pub type ServerApp<E, E2> = crate::util::ServerApp<Server<E, E2>, E2>;

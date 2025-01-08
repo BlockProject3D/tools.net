@@ -32,8 +32,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::watch;
 use tokio::sync::broadcast;
-use crate::tcp::util::Network;
-use crate::util::DataMsg;
+use crate::tcp::util::{DataMsg, Network};
 
 /// Represents a client event handler.
 pub trait Handler {
