@@ -26,40 +26,28 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use bp3d_net::tcp::client::{Client, Factory, Handler};
-use bp3d_net::tcp::util::Network;
+use bp3d_net::tcp::server;
+use bp3d_net::tcp::client;
+use testprog::client::EchoClientFactory;
+use testprog::server::EchoServerFactory;
 
-pub struct EchoClient {
-    client: Arc<Client<String, String>>
-}
-
-impl Handler for EchoClient {
-    type Request = String;
-    type Reply = String;
-
-    async fn request(&mut self, event: Self::Request, net: &mut Network) {
-        net.write_all(event.as_bytes()).await.unwrap();
-        net.write_all(b"\n").await.unwrap();
+#[tokio::test]
+async fn basic() {
+    let server = server::Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4242).await.unwrap();
+    let mut client1 = client::Builder::new(EchoClientFactory).connect("127.0.0.1:4242").await.unwrap();
+    let mut client2 = client::Builder::new(EchoClientFactory).connect("127.0.0.1:4242").await.unwrap();
+    {
+        client1.client().request_async(String::from("hello world")).await.unwrap();
+        assert_eq!(client1.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
+        assert_eq!(client2.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
     }
-
-    async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
-        let mut s = String::new();
-        net.read_line(&mut s).await?;
-        self.client.reply(s).await.unwrap();
-        Ok(())
+    {
+        client2.client().request_async(String::from("hello world")).await.unwrap();
+        assert_eq!(client1.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
+        assert_eq!(client2.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
     }
-}
-
-pub struct EchoClientFactory;
-
-impl Factory for EchoClientFactory {
-    type Handler = EchoClient;
-
-    fn start(self, client: &Arc<Client<String, String>>) -> Self::Handler {
-        EchoClient {
-            client: client.clone()
-        }
-    }
+    client1.client().request_async(String::from("exit")).await.unwrap();
+    server.join().await.unwrap();
+    client1.join().await.unwrap();
+    client2.join().await.unwrap();
 }

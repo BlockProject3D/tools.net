@@ -239,7 +239,7 @@ impl<E, E2> Client<E, E2> {
     }
 }
 
-/// Represents a server application.
+/// Represents a client application.
 pub struct ClientApp<E, E2> {
     client: Arc<Client<E, E2>>,
     handle: JoinHandle<std::io::Result<()>>,

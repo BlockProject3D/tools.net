@@ -33,12 +33,13 @@ use bp3d_net::tcp::server::{ClientHandler, Factory, Handler, Server};
 use bp3d_net::tcp::util::Network;
 
 pub struct EchoServer {
-    server: Arc<Server<()>>,
+    server: Arc<Server<(), ()>>,
 }
 
 impl Handler for EchoServer {
     type ClientHandler = EchoServer;
-    type Event = ();
+    type Request = ();
+    type Reply = ();
 
     async fn connect(&mut self, _: &mut Network) -> std::io::Result<Self::ClientHandler> {
         Ok(EchoServer { server: self.server.clone() })
@@ -66,7 +67,7 @@ pub struct EchoServerFactory;
 impl Factory for EchoServerFactory {
     type Handler = EchoServer;
 
-    fn start(self, server: &Arc<Server<()>>) -> Self::Handler {
+    fn start(self, server: &Arc<Server<(), ()>>) -> Self::Handler {
         EchoServer { server: server.clone() }
     }
 }
