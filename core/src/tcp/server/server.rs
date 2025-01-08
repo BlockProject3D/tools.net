@@ -50,7 +50,7 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the server is about to start to create the corresponding event handler.
-    fn start(self, server: &Arc<Server<<Self::Handler as Handler>::Event>>) -> Self::Handler;
+    fn start(self, server: &Arc<Server<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
 }
 
 /// A trait which represents the main server event handler.
@@ -58,17 +58,20 @@ pub trait Handler {
     /// The type of the client event handler.
     type ClientHandler: super::client::Handler + Send + 'static;
 
-    /// The type of event which can be received by this server event handler.
-    type Event: Send + 'static;
+    /// The type of request event which can be received by this server event handler.
+    type Request: Send + 'static;
 
-    /// Called when an event was received by the server.
+    /// The type of reply event which can be sent by this server event handler.
+    type Reply: Send + 'static;
+
+    /// Called when a request event was received by the server.
     ///
     /// # Arguments
     ///
     /// * `event`: the received event
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn event(&mut self, _: Self::Event) -> impl Future<Output = ()> + Send {
+    fn request(&mut self, _: Self::Request) -> impl Future<Output = ()> + Send {
         async move {}
     }
 
@@ -103,8 +106,8 @@ struct ServerTask<H: Handler> {
     handler: H,
     listener: TcpListener,
     exit_receiver: watch::Receiver<()>,
-    event_receiver: mpsc::Receiver<H::Event>,
-    server: Arc<Server<H::Event>>
+    request_receiver: mpsc::Receiver<H::Request>,
+    server: Arc<Server<H::Request, H::Reply>>
 }
 
 impl<H: Handler + Send + 'static> ServerTask<H> {
@@ -141,7 +144,7 @@ impl<H: Handler + Send + 'static> ServerTask<H> {
                         (net, handler)
                     });
                 },
-                Some(event) = self.event_receiver.recv() => self.handler.event(event).await,
+                Some(event) = self.request_receiver.recv() => self.handler.request(event).await,
                 _ = self.exit_receiver.changed() => break,
                 Some(res) = set.join_next() => {
                     self.server.cur_clients.fetch_sub(1, Relaxed);
@@ -218,7 +221,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Event>> {
+    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
         self.bind((Ipv4Addr::UNSPECIFIED, port)).await
     }
 
@@ -233,7 +236,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Event>> {
+    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
         self.bind((Ipv4Addr::LOCALHOST, port)).await
     }
 
@@ -248,17 +251,19 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<<F::Handler as Handler>::Event>> {
+    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
         let listener = TcpListener::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
         let (brd_sender, _) = broadcast::channel(self.max_clients);
-        let (event_sender, event_receiver) = mpsc::channel(self.event_queue_size);
+        let (request_sender, request_receiver) = mpsc::channel(self.event_queue_size);
+        let (reply_sender, reply_receiver) = mpsc::channel(self.event_queue_size);
         let server = Arc::new(Server {
-            event_sender,
+            request_sender,
             broadcast: brd_sender,
             exit: exit_sender,
             max_clients: self.max_clients,
-            cur_clients: AtomicUsize::new(0)
+            cur_clients: AtomicUsize::new(0),
+            reply_sender
         });
         let handler = self.factory.start(&server);
         let motherfuckingrust = server.clone();
@@ -267,28 +272,30 @@ impl<F: Factory> Builder<F> {
                 handler,
                 listener,
                 exit_receiver,
-                event_receiver,
+                request_receiver,
                 server
             };
             task.run().await
         });
         Ok(ServerApp {
             handle,
-            server: motherfuckingrust
+            server: motherfuckingrust,
+            reply_receiver
         })
     }
 }
 
 /// Represents a running server.
-pub struct Server<E> {
+pub struct Server<E, E2> {
     exit: watch::Sender<()>,
     broadcast: broadcast::Sender<DataMsg>,
     cur_clients: AtomicUsize,
     max_clients: usize,
-    event_sender: mpsc::Sender<E>
+    request_sender: mpsc::Sender<E>,
+    reply_sender: mpsc::Sender<E2>
 }
 
-impl<E: Send + 'static> Server<E> {
+impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     /// Returns the maximum number of clients allowed at the same time.
     pub fn max_clients(&self) -> usize {
         self.max_clients
@@ -304,7 +311,7 @@ impl<E: Send + 'static> Server<E> {
         let _ = self.exit.send(());
     }
 
-    /// Send an event to the main server event handler from asynchronous code.
+    /// Send a request to the main server event handler from asynchronous code.
     ///
     /// # Arguments
     ///
@@ -315,15 +322,15 @@ impl<E: Send + 'static> Server<E> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn event_async(&self, event: E) -> Result<(), SendError<E>> {
-        self.event_sender.send(event).await
+    pub async fn request_async(&self, event: E) -> Result<(), SendError<E>> {
+        self.request_sender.send(event).await
     }
 
-    /// Send an event to the main server event handler from synchronous code.
+    /// Send a request to the main server event handler from synchronous code.
     ///
     /// # Arguments
     ///
-    /// * `event`:
+    /// * `event`: the event to send.
     ///
     /// returns: Result<(), TrySendError<E>>
     ///
@@ -331,8 +338,23 @@ impl<E: Send + 'static> Server<E> {
     ///
     /// Returns a TrySendError if the server has exited or if the event queue is full.
     /// See [Builder] for more information on the configuration of the event queue.
-    pub fn event(&self, event: E) -> Result<(), TrySendError<E>> {
-        self.event_sender.try_send(event)
+    pub fn request(&self, event: E) -> Result<(), TrySendError<E>> {
+        self.request_sender.try_send(event)
+    }
+
+    /// Sends a reply event to the main application.
+    ///
+    /// # Arguments
+    ///
+    /// * `event`: the event to send.
+    ///
+    /// returns: Result<(), SendError<E2>>
+    ///
+    /// # Errors
+    ///
+    /// Returns a SendError if the server has exited.
+    pub async fn reply(&self, event: E2) -> Result<(), SendError<E2>> {
+        self.reply_sender.send(event).await
     }
 
     /// Send the given data buffer and flush a client stream.
@@ -392,17 +414,41 @@ impl<E: Send + 'static> Server<E> {
 }
 
 /// Represents a server application.
-pub struct ServerApp<E> {
+pub struct ServerApp<E, E2> {
     handle: JoinHandle<std::io::Result<()>>,
-    server: Arc<Server<E>>
+    server: Arc<Server<E, E2>>,
+    reply_receiver: mpsc::Receiver<E2>
 }
 
-impl<E> ServerApp<E> {
+impl<E, E2> ServerApp<E, E2> {
     /// Join and waits for the server to stop.
     ///
     /// Warning: this does not automatically exit the server and will wait for a future call to the
     /// [Server::exit] function before returning.
     pub async fn join(self) -> std::io::Result<()> {
         self.handle.await?
+    }
+
+    /// Returns the underlying server.
+    pub fn server(&self) -> &Arc<Server<E, E2>> {
+        &self.server
+    }
+
+    /// Receive an event from the main server event handler from asynchronous code.
+    ///
+    /// Returns None when the channel is closed.
+    ///
+    /// returns: Option<E>
+    pub async fn get_reply_async(&mut self) -> Option<E2> {
+        self.reply_receiver.recv().await
+    }
+
+    /// Receive an event from the main server event handler from synchronous code.
+    ///
+    /// Returns None when the channel is closed or empty.
+    ///
+    /// returns: Option<E>
+    pub fn get_reply(&mut self) -> Option<E2> {
+        self.reply_receiver.try_recv().ok()
     }
 }

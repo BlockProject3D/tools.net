@@ -42,10 +42,13 @@ use crate::util::DataMsg;
 
 /// Represents the main event handler for a TCP client.
 pub trait Handler {
-    /// The type of event which can be received by this event handler.
-    type Event: Send + 'static;
+    /// The type of request event which can be received by this event handler.
+    type Request: Send + 'static;
 
-    /// Called when an event was received by the client.
+    /// The type of reply event which can be sent by this event handler.
+    type Reply: Send + 'static;
+
+    /// Called when a request event was received by the client.
     ///
     /// # Arguments
     ///
@@ -53,7 +56,7 @@ pub trait Handler {
     /// * `net`: the network context.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn event(&mut self, _: Self::Event, _: &mut Network) -> impl Future<Output = ()> + Send {
+    fn request(&mut self, _: Self::Request, _: &mut Network) -> impl Future<Output = ()> + Send {
         async move {}
     }
 
@@ -86,7 +89,7 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the client is about to start to create the corresponding event handler.
-    fn start(self, client: &Arc<Client<<Self::Handler as Handler>::Event>>) -> Self::Handler;
+    fn start(self, client: &Arc<Client<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Client structure).
@@ -139,16 +142,18 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the client could not connect to the specified server.
-    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<<F::Handler as Handler>::Event>> {
+    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
         let stream = TcpStream::connect(addr).await?;
         let addr = stream.peer_addr()?;
         let mut net = Network::new(0, stream, addr);
-        let (event_sender, mut event_receiver) = mpsc::channel(self.event_queue_size);
+        let (request_sender, mut request_receiver) = mpsc::channel(self.event_queue_size);
+        let (reply_sender, reply_receiver) = mpsc::channel(self.event_queue_size);
         let (exit_sender, mut exit_receiver) = watch::channel(());
         let (data_sender, mut data_receiver) = mpsc::channel(self.event_queue_size);
         let client = Arc::new(Client {
             exit: exit_sender,
-            event_sender,
+            request_sender,
+            reply_sender,
             data: data_sender
         });
         let mut handler = self.factory.start(&client);
@@ -156,7 +161,7 @@ impl<F: Factory> Builder<F> {
             loop {
                 select! {
                     _ = exit_receiver.changed() => break,
-                    Some(event) = event_receiver.recv() => handler.event(event, &mut net).await,
+                    Some(event) = request_receiver.recv() => handler.request(event, &mut net).await,
                     res = net.ready() => {
                         let ev = res?;
                         if ev.is_error() || ev.is_read_closed() || ev.is_write_closed() {
@@ -176,25 +181,27 @@ impl<F: Factory> Builder<F> {
         });
         Ok(ClientApp {
             client,
-            handle
+            handle,
+            reply_receiver
         })
     }
 }
 
 /// Represents a client with a long-running connection.
-pub struct Client<E> {
+pub struct Client<E, E2> {
     exit: watch::Sender<()>,
-    event_sender: mpsc::Sender<E>,
-    data: mpsc::Sender<DataMsg>
+    request_sender: mpsc::Sender<E>,
+    data: mpsc::Sender<DataMsg>,
+    reply_sender: mpsc::Sender<E2>
 }
 
-impl<E> Client<E> {
+impl<E, E2> Client<E, E2> {
     /// Requests exit of the client.
     pub fn exit(&self) {
         let _ = self.exit.send(());
     }
 
-    /// Send an event to the main event handler from asynchronous code.
+    /// Send a request to the main event handler from asynchronous code.
     ///
     /// # Arguments
     ///
@@ -205,11 +212,11 @@ impl<E> Client<E> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn event_async(&self, event: E) -> Result<(), SendError<E>> {
-        self.event_sender.send(event).await
+    pub async fn request_async(&self, event: E) -> Result<(), SendError<E>> {
+        self.request_sender.send(event).await
     }
 
-    /// Send an event to the main event handler from synchronous code.
+    /// Send a request to the main event handler from synchronous code.
     ///
     /// # Arguments
     ///
@@ -221,8 +228,23 @@ impl<E> Client<E> {
     ///
     /// Returns a TrySendError if the server has exited or if the event queue is full.
     /// See [Builder] for more information on the configuration of the event queue.
-    pub fn event(&self, event: E) -> Result<(), TrySendError<E>> {
-        self.event_sender.try_send(event)
+    pub fn request(&self, event: E) -> Result<(), TrySendError<E>> {
+        self.request_sender.try_send(event)
+    }
+
+    /// Sends a reply event to the main application.
+    ///
+    /// # Arguments
+    ///
+    /// * `event`: the event to send.
+    ///
+    /// returns: Result<(), SendError<E2>>
+    ///
+    /// # Errors
+    ///
+    /// Returns a SendError if the server has exited.
+    pub async fn reply(&self, event: E2) -> Result<(), SendError<E2>> {
+        self.reply_sender.send(event).await
     }
 
     /// Send the given data buffer and flush the stream.
@@ -251,17 +273,41 @@ impl<E> Client<E> {
 }
 
 /// Represents a client application.
-pub struct ClientApp<E> {
+pub struct ClientApp<E, E2> {
     handle: JoinHandle<std::io::Result<()>>,
-    client: Arc<Client<E>>
+    client: Arc<Client<E, E2>>,
+    reply_receiver: mpsc::Receiver<E2>
 }
 
-impl<E> ClientApp<E> {
+impl<E, E2> ClientApp<E, E2> {
     /// Join and waits for the client to stop.
     ///
     /// Warning this does not automatically exit the client and will wait for a future call to the
     /// [Client::exit] function before returning.
     pub async fn join(self) -> std::io::Result<()> {
         self.handle.await?
+    }
+
+    /// Returns the underlying client.
+    pub fn client(&self) -> &Arc<Client<E, E2>> {
+        &self.client
+    }
+
+    /// Receive an event from the main client event handler from asynchronous code.
+    ///
+    /// Returns None when the channel is closed.
+    ///
+    /// returns: Option<E>
+    pub async fn get_reply_async(&mut self) -> Option<E2> {
+        self.reply_receiver.recv().await
+    }
+
+    /// Receive an event from the main client event handler from synchronous code.
+    ///
+    /// Returns None when the channel is closed or empty.
+    ///
+    /// returns: Option<E>
+    pub fn get_reply(&mut self) -> Option<E2> {
+        self.reply_receiver.try_recv().ok()
     }
 }

@@ -41,8 +41,11 @@ use crate::udp::util::Datagram;
 
 /// A trait which represents the main server event handler.
 pub trait Handler {
-    /// The type of event which can be received by this server event handler.
-    type Event: Send + 'static;
+    /// The type of request event which can be received by this server event handler.
+    type Request: Send + 'static;
+
+    /// The type of reply event which can be sent by this server event handler.
+    type Reply: Send + 'static;
 
     /// Called when a datagram was received from the socket.
     ///
@@ -52,9 +55,9 @@ pub trait Handler {
     /// * `datagram`: the received datagram.
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
-    fn recv(&mut self, server: &Server<Self::Event>, datagram: Datagram) -> impl Future<Output = std::io::Result<()>> + Send;
+    fn recv(&mut self, server: &Server<Self::Request, Self::Reply>, datagram: Datagram) -> impl Future<Output = std::io::Result<()>> + Send;
 
-    /// Called when an event was received by the server.
+    /// Called when a request event was received by the server.
     ///
     /// # Arguments
     ///
@@ -62,15 +65,15 @@ pub trait Handler {
     /// * `event`: the received event.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn event(&mut self, _: &Server<Self::Event>, _: Self::Event) -> impl Future<Output = ()> + Send {
+    fn request(&mut self, _: &Server<Self::Request, Self::Reply>, _: Self::Request) -> impl Future<Output = ()> + Send {
         async move { }
     }
 }
 
 struct ServerTask<H: Handler, const N: usize> {
-    server: Arc<Server<H::Event>>,
+    server: Arc<Server<H::Request, H::Reply>>,
     exit_receiver: watch::Receiver<()>,
-    event_receiver: mpsc::Receiver<H::Event>,
+    request_receiver: mpsc::Receiver<H::Request>,
     buffer: [u8; N],
     handler: H
 }
@@ -84,7 +87,7 @@ impl<H: Handler + Send + 'static, const N: usize> ServerTask<H, N> {
                     let (len, addr) = res?;
                     self.handler.recv(&self.server, Datagram::new(addr, &self.buffer[..len])).await?;
                 },
-                Some(event) = self.event_receiver.recv() => self.handler.event(&self.server, event).await
+                Some(event) = self.request_receiver.recv() => self.handler.request(&self.server, event).await
             }
         }
         Ok(())
@@ -133,7 +136,7 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<H::Event>> {
+    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<H::Request, H::Reply>> {
         self.bind((Ipv4Addr::UNSPECIFIED, port)).await
     }
 
@@ -148,7 +151,7 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<H::Event>> {
+    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<H::Request, H::Reply>> {
         self.bind((Ipv4Addr::LOCALHOST, port)).await
     }
 
@@ -163,21 +166,23 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<H::Event>> {
+    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<H::Request, H::Reply>> {
         let socket = UdpSocket::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
-        let (event_sender, event_receiver) = mpsc::channel(self.event_queue_size);
+        let (request_sender, request_receiver) = mpsc::channel(self.event_queue_size);
+        let (reply_sender, reply_receiver) = mpsc::channel(self.event_queue_size);
         let server = Arc::new(Server {
             socket,
             exit: exit_sender,
-            event_sender
+            request_sender,
+            reply_sender
         });
         let motherfuckingrust = server.clone();
         let handle = tokio::spawn(async move {
             let task = ServerTask {
                 server,
                 exit_receiver,
-                event_receiver,
+                request_receiver,
                 buffer: self.init_buffer,
                 handler: self.handler
             };
@@ -185,25 +190,27 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
         });
         Ok(ServerApp {
             server: motherfuckingrust,
-            handle
+            handle,
+            reply_receiver
         })
     }
 }
 
 /// Represents a running server.
-pub struct Server<E> {
+pub struct Server<E, E2> {
     socket: UdpSocket,
     exit: watch::Sender<()>,
-    event_sender: mpsc::Sender<E>
+    request_sender: mpsc::Sender<E>,
+    reply_sender: mpsc::Sender<E2>
 }
 
-impl<E> Server<E> {
+impl<E, E2> Server<E, E2> {
     /// Requests exit of the server.
     pub fn exit(&self) {
         let _ = self.exit.send(());
     }
 
-    /// Send an event to the main event handler from asynchronous code.
+    /// Send a request event to the main event handler from asynchronous code.
     ///
     /// # Arguments
     ///
@@ -214,11 +221,11 @@ impl<E> Server<E> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn event_async(&self, event: E) -> Result<(), SendError<E>> {
-        self.event_sender.send(event).await
+    pub async fn request_async(&self, event: E) -> Result<(), SendError<E>> {
+        self.request_sender.send(event).await
     }
 
-    /// Send an event to the main event handler from synchronous code.
+    /// Send a request event to the main event handler from synchronous code.
     ///
     /// # Arguments
     ///
@@ -230,8 +237,23 @@ impl<E> Server<E> {
     ///
     /// Returns a TrySendError if the server has exited or if the event queue is full.
     /// See [Builder] for more information on the configuration of the event queue.
-    pub fn event(&self, event: E) -> Result<(), TrySendError<E>> {
-        self.event_sender.try_send(event)
+    pub fn request(&self, event: E) -> Result<(), TrySendError<E>> {
+        self.request_sender.try_send(event)
+    }
+
+    /// Sends a reply event to the main application.
+    ///
+    /// # Arguments
+    ///
+    /// * `event`: the event to send.
+    ///
+    /// returns: Result<(), SendError<E2>>
+    ///
+    /// # Errors
+    ///
+    /// Returns a SendError if the server has exited.
+    pub async fn reply(&self, event: E2) -> Result<(), SendError<E2>> {
+        self.reply_sender.send(event).await
     }
 
     /// Send a datagram to a peer from this server socket.
@@ -248,17 +270,41 @@ impl<E> Server<E> {
 }
 
 /// Represents a server application.
-pub struct ServerApp<E> {
-    server: Arc<Server<E>>,
-    handle: JoinHandle<std::io::Result<()>>
+pub struct ServerApp<E, E2> {
+    server: Arc<Server<E, E2>>,
+    handle: JoinHandle<std::io::Result<()>>,
+    reply_receiver: mpsc::Receiver<E2>
 }
 
-impl<E> ServerApp<E> {
+impl<E, E2> ServerApp<E, E2> {
     /// Join and waits for the server to stop.
     ///
     /// Warning: this does not automatically exit the server and will wait for a future call to the
     /// [Server::exit] function before returning.
     pub async fn join(self) -> std::io::Result<()> {
         self.handle.await?
+    }
+
+    /// Returns the underlying server.
+    pub fn server(&self) -> &Arc<Server<E, E2>> {
+        &self.server
+    }
+
+    /// Receive an event from the main server event handler from asynchronous code.
+    ///
+    /// Returns None when the channel is closed.
+    ///
+    /// returns: Option<E>
+    pub async fn get_reply_async(&mut self) -> Option<E2> {
+        self.reply_receiver.recv().await
+    }
+
+    /// Receive an event from the main server event handler from synchronous code.
+    ///
+    /// Returns None when the channel is closed or empty.
+    ///
+    /// returns: Option<E>
+    pub fn get_reply(&mut self) -> Option<E2> {
+        self.reply_receiver.try_recv().ok()
     }
 }
