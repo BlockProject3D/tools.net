@@ -26,10 +26,51 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! A multi-client TCP server implementation designed for long-running connections.
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+use bp3d_net::tcp::client::{Client, Factory, Handler};
+use bp3d_net::tcp::util::Network;
 
-mod server;
-mod client;
+pub struct EchoClient {
+    incoming_chat_messages: mpsc::Sender<String>
+}
 
-pub use server::{Builder, Server, ServerApp, Handler, Factory};
-pub use client::Handler as ClientHandler;
+impl Handler for EchoClient {
+    type Event = String;
+
+    async fn event(&mut self, event: Self::Event, net: &mut Network) {
+        net.write_all(event.as_bytes()).await.unwrap();
+        net.write_all(b"\n").await.unwrap();
+    }
+
+    async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
+        let mut s = String::new();
+        net.read_line(&mut s).await?;
+        let _ = self.incoming_chat_messages.send(s).await;
+        Ok(())
+    }
+}
+
+pub struct EchoClientFactory {
+    incoming_chat_messages_sender: mpsc::Sender<String>,
+}
+
+impl EchoClientFactory {
+    pub fn new() -> (EchoClientFactory, mpsc::Receiver<String>) {
+        let (incoming_chat_messages_sender, incoming_chat_messages) = mpsc::channel(8);
+        (EchoClientFactory {
+            incoming_chat_messages_sender,
+        }, incoming_chat_messages)
+    }
+}
+
+impl Factory for EchoClientFactory {
+    type Handler = EchoClient;
+
+    fn start(self, _: &Arc<Client<<Self::Handler as Handler>::Event>>) -> Self::Handler {
+        EchoClient {
+            incoming_chat_messages: self.incoming_chat_messages_sender,
+        }
+    }
+}

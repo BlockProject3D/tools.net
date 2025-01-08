@@ -26,10 +26,37 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! A multi-client TCP server implementation designed for long-running connections.
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use bp3d_net::tcp::server::Builder;
+use testprog::server::EchoServerFactory;
 
-mod server;
-mod client;
-
-pub use server::{Builder, Server, ServerApp, Handler, Factory};
-pub use client::Handler as ClientHandler;
+#[tokio::test]
+async fn basic() {
+    let server = Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4242).await.unwrap();
+    let mut client1 = TcpStream::connect("127.0.0.1:4242").await.unwrap();
+    let mut client2 = TcpStream::connect("127.0.0.1:4242").await.unwrap();
+    let mut buf = [0; 12];
+    {
+        client1.write_all(b"hello world\n").await.unwrap();
+        client1.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello world\n");
+        buf.fill(0x0);
+        client2.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello world\n");
+        buf.fill(0x0);
+    }
+    {
+        client2.write_all(b"hello world\n").await.unwrap();
+        client1.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello world\n");
+        buf.fill(0x0);
+        client2.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello world\n");
+        buf.fill(0x0);
+    }
+    client1.write_all(b"exit\n").await.unwrap();
+    server.join().await.unwrap();
+    assert!(client1.read_exact(&mut buf).await.is_err());
+    assert!(client2.read_exact(&mut buf).await.is_err());
+}

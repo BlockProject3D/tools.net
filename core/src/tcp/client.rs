@@ -49,10 +49,11 @@ pub trait Handler {
     ///
     /// # Arguments
     ///
-    /// * `event`: the received event
+    /// * `event`: the received event.
+    /// * `net`: the network context.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn event(&mut self, _: Self::Event) -> impl Future<Output = ()> + Send {
+    fn event(&mut self, _: Self::Event, _: &mut Network) -> impl Future<Output = ()> + Send {
         async move {}
     }
 
@@ -155,7 +156,7 @@ impl<F: Factory> Builder<F> {
             loop {
                 select! {
                     _ = exit_receiver.changed() => break,
-                    Some(event) = event_receiver.recv() => handler.event(event).await,
+                    Some(event) = event_receiver.recv() => handler.event(event, &mut net).await,
                     res = net.ready() => {
                         let ev = res?;
                         if ev.is_error() || ev.is_read_closed() || ev.is_write_closed() {

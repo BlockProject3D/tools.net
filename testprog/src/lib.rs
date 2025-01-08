@@ -26,10 +26,5 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! A multi-client TCP server implementation designed for long-running connections.
-
-mod server;
-mod client;
-
-pub use server::{Builder, Server, ServerApp, Handler, Factory};
-pub use client::Handler as ClientHandler;
+pub mod server;
+pub mod client;

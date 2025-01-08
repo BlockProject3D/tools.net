@@ -26,10 +26,47 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! A multi-client TCP server implementation designed for long-running connections.
+use std::sync::Arc;
+use bp3d_debug::debug;
+use tokio::io::AsyncBufReadExt;
+use bp3d_net::tcp::server::{ClientHandler, Factory, Handler, Server};
+use bp3d_net::tcp::util::Network;
 
-mod server;
-mod client;
+pub struct EchoServer {
+    server: Arc<Server<()>>,
+}
 
-pub use server::{Builder, Server, ServerApp, Handler, Factory};
-pub use client::Handler as ClientHandler;
+impl Handler for EchoServer {
+    type ClientHandler = EchoServer;
+    type Event = ();
+
+    async fn connect(&mut self, _: &mut Network) -> std::io::Result<Self::ClientHandler> {
+        Ok(EchoServer { server: self.server.clone() })
+    }
+}
+
+impl ClientHandler for EchoServer {
+    async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
+        let mut s = String::new();
+        net.read_line(&mut s).await?;
+        debug!("Received: {:?}", s);
+        if s == "exit\n" {
+            self.server.exit();
+        }
+        let motherfuckingrust = self.server.clone();
+        tokio::spawn(async move {
+            motherfuckingrust.broadcast(s.as_bytes()).await;
+        });
+        Ok(())
+    }
+}
+
+pub struct EchoServerFactory;
+
+impl Factory for EchoServerFactory {
+    type Handler = EchoServer;
+
+    fn start(self, server: &Arc<Server<()>>) -> Self::Handler {
+        EchoServer { server: server.clone() }
+    }
+}
