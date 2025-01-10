@@ -42,6 +42,7 @@ impl Handler for EchoClient {
     async fn request(&mut self, event: Self::Request, net: &mut Network) {
         net.write_all(event.as_bytes()).await.unwrap();
         net.write_all(b"\n").await.unwrap();
+        net.flush().await.unwrap();
     }
 
     async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
