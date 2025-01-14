@@ -27,12 +27,15 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::future::Future;
-use bp3d_debug::trace;
+use bp3d_debug::{error, trace, warning};
 use tokio::io::AsyncWriteExt;
 use tokio::select;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::broadcast;
-use crate::tcp::util::{DataMsg, Network};
+use crate::tcp::buffer::{Bytes, ChannelBuffer};
+use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
+use crate::tcp::util::{DataMsg, Network, ReadyEvent};
 
 /// Represents a client event handler.
 pub trait Handler {
@@ -40,10 +43,10 @@ pub trait Handler {
     ///
     /// # Arguments
     ///
-    /// * `net`: the network context.
+    /// * `net`: the network receiver context.
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
-    fn recv(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<()>> + Send;
+    fn recv(&mut self, net: &mut NetReceiver) -> impl Future<Output = std::io::Result<()>> + Send;
 
     /// Called when the client task is about to return.
     ///
@@ -61,32 +64,54 @@ pub trait Handler {
 
 pub(crate) struct ClientTask<'a, H> {
     pub(crate) net: &'a mut Network,
-    pub(crate) handler: &'a mut H,
+    pub(crate) handler: H,
     pub(crate) exit: watch::Receiver<()>,
     pub(crate) broadcast: broadcast::Receiver<DataMsg>
 }
 
 impl<'a, H: Handler + Send + 'static> ClientTask<'a, H> {
-    pub(crate) async fn run(mut self) -> std::io::Result<()> {
+    pub(crate) async fn run(mut self) -> H {
+        let net_id = self.net.id();
+        let addr = *self.net.addr();
+        let (bytes_sender, bytes_receiver) = mpsc::channel(BYTES_CHANNEL_SIZE);
+        let handle = tokio::spawn(async move {
+            let mut net = NetReceiver::new(ChannelBuffer::new(bytes_receiver), addr, net_id);
+            if let Err(e) = self.handler.recv(&mut net).await {
+                error!({?net}, "Client error: {}", e);
+            }
+            net.channel_buffer.close();
+            self.handler
+        });
+        let mut buf = [0; BYTES_BUFFER_SIZE];
         loop {
             select! {
-                res = self.net.ready() => {
-                    let ev = res?;
-                    if ev.is_error() || ev.is_read_closed() || ev.is_write_closed() {
-                        break;
-                    }
-                    if ev.is_readable() {
-                        self.handler.recv(self.net).await?;
+                Ok(event) = self.net.ready(&mut buf) => {
+                    match event {
+                        ReadyEvent::ConnectionLoss => break,
+                        ReadyEvent::None => continue,
+                        ReadyEvent::Read(v) => {
+                            if let Err(e) = bytes_sender.send(Bytes::new(buf, v)).await {
+                                warning!("ChannelBuffer prematurely closed: {}", e);
+                                break;
+                            }
+                        }
                     }
                 },
                 Ok(msg) = self.broadcast.recv() => unsafe {
-                    handle_broadcast(msg, self.net).await?
+                    if let Err(e) = handle_broadcast(msg, self.net).await {
+                        error!({net=?self.net}, "Client network error: {}", e);
+                        break;
+                    }
                 },
                 _ = self.exit.changed() => break
             }
         }
-        self.handler.disconnect(self.net).await?;
-        Ok(())
+        drop(bytes_sender);
+        let mut handler = handle.await.unwrap();
+        if let Err(e) = handler.disconnect(self.net).await {
+            error!({net=?self.net}, "Client error: {}", e);
+        }
+        handler
     }
 }
 

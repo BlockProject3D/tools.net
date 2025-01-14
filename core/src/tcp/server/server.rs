@@ -29,9 +29,9 @@
 use std::future::Future;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{debug, error, trace};
+use bp3d_debug::{debug, trace};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::select;
@@ -126,20 +126,18 @@ impl<H: Handler + Send + 'static> ServerTask<H> {
                         continue;
                     }
                     let mut net = Network::new(id, stream, addr);
-                    let mut handler = self.handler.connect(&mut net).await?;
+                    let handler = self.handler.connect(&mut net).await?;
                     let motherfuckingrust = self.server.exit.subscribe();
                     let motherfuckingrust1 = self.server.broadcast.subscribe();
                     debug!({?net}, "Client connected");
                     set.spawn(async move {
                         let task = ClientTask {
                             net: &mut net,
-                            handler: &mut handler,
+                            handler,
                             exit: motherfuckingrust,
                             broadcast: motherfuckingrust1
                         };
-                        if let Err(e) = task.run().await {
-                            error!({?net}, "Client error: {}", e)
-                        }
+                        let handler = task.run().await;
                         (net, handler)
                     });
                 },
@@ -262,7 +260,8 @@ impl<F: Factory> Builder<F> {
             exit: exit_sender,
             max_clients: self.max_clients,
             cur_clients: AtomicUsize::new(0),
-            reply_sender
+            reply_sender,
+            is_exiting: AtomicBool::new(false),
         });
         let handler = self.factory.start(&server);
         let motherfuckingrust = server.clone();
@@ -291,7 +290,8 @@ pub struct Server<E, E2> {
     cur_clients: AtomicUsize,
     max_clients: usize,
     request_sender: mpsc::Sender<E>,
-    reply_sender: mpsc::Sender<E2>
+    reply_sender: mpsc::Sender<E2>,
+    is_exiting: AtomicBool
 }
 
 impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
@@ -307,6 +307,7 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
 
     /// Requests exit of the server.
     pub fn exit(&self) {
+        self.is_exiting.store(true, Relaxed);
         let _ = self.exit.send(());
     }
 
@@ -364,7 +365,10 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     /// * `msg`: the message buffer to send.
     ///
     /// returns: true if the operation has succeeded, false otherwise.
-    pub async fn send(&self, net_id: usize, msg: &[u8]) -> bool {
+    pub async fn send(&self, net_id: usize, msg: &[u8]) -> Result<(), crate::tcp::util::SendError> {
+        if self.is_exiting.load(Relaxed) {
+            return Err(crate::tcp::util::SendError::IsExiting);
+        }
         // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
         // consumed the pointer before returning.
         let synchro = Semaphore::new(0);
@@ -374,14 +378,14 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
             buffer_size: msg.len(),
             net_id
         }) {
-            Err(_) => return false,
-            Ok(v) => debug!("Number of clients seen by tokio: {}", v)
+            Err(_) => return Err(crate::tcp::util::SendError::Closed),
+            Ok(v) => debug!("Broadcasting to {} client(s)", v)
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);
         let _ = synchro.acquire_many(clients as _).await.unwrap();
         trace!("All clients have acknowledged");
-        true
+        Ok(())
     }
 
     /// Broadcast the given data buffer to all clients.
@@ -391,7 +395,10 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     /// * `msg`: the message buffer to broadcast.
     ///
     /// returns: true if the operation has succeeded, false otherwise.
-    pub async fn broadcast(&self, msg: &[u8]) -> bool {
+    pub async fn broadcast(&self, msg: &[u8]) -> Result<(), crate::tcp::util::SendError> {
+        if self.is_exiting.load(Relaxed) {
+            return Err(crate::tcp::util::SendError::IsExiting);
+        }
         // SAFETY: It is safe to pass a pointer to msg and synchro as long as we wait for all
         // clients to have consumed the pointers before returning.
         let synchro = Semaphore::new(0);
@@ -401,14 +408,14 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
             buffer_size: msg.len(),
             net_id: 0
         }) {
-            Err(_) => return false,
-            Ok(v) => debug!("Number of clients seen by tokio: {}", v)
+            Err(_) => return Err(crate::tcp::util::SendError::Closed),
+            Ok(v) => debug!("Broadcasting to {} client(s)", v)
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);
         let _ = synchro.acquire_many(clients as _).await.unwrap();
         trace!("All clients have acknowledged");
-        true
+        Ok(())
     }
 }
 

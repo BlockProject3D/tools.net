@@ -31,15 +31,34 @@
 use tokio::sync::{mpsc, watch, Semaphore};
 use std::future::Future;
 use std::sync::Arc;
-use bp3d_debug::trace;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
+use bp3d_debug::{error, trace, warning};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use crate::tcp::util::{DataMsg, Network};
+use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
+use crate::tcp::buffer::{Bytes, ChannelBuffer};
+use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+
+/// The reader trait which is supposed to handle the actual data reading loop.
+pub trait Reader {
+    /// Called when data is pending to be received from the socket.
+    ///
+    /// # Arguments
+    ///
+    /// * `net`: the network receiver context.
+    ///
+    /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
+    fn recv(&mut self, net: &mut NetReceiver) -> impl Future<Output = std::io::Result<()>> + Send;
+}
 
 /// Represents the main event handler for a TCP client.
 pub trait Handler {
+    /// The type of the reader.
+    type Reader: Reader + Send + 'static;
+
     /// The type of request event which can be received by this event handler.
     type Request: Send + 'static;
 
@@ -58,14 +77,16 @@ pub trait Handler {
         async move {}
     }
 
-    /// Called when data is pending to be received from the socket.
+    /// Called when the client task has connected to the server.
+    ///
+    /// The function is expected to return a new event handler for the given client.
     ///
     /// # Arguments
     ///
-    /// * `net`: the network context.
+    /// * `net`: the network context created for this client.
     ///
-    /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
-    fn recv(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<()>> + Send;
+    /// returns: impl Future<Output=Result<Self::Reader, Error>>+Send+Sized
+    fn connect(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<Self::Reader>> + Send;
 
     /// Called when the client task is about to return.
     ///
@@ -152,28 +173,46 @@ impl<F: Factory> Builder<F> {
             exit: exit_sender,
             request_sender,
             reply_sender,
-            data: data_sender
+            data: data_sender,
+            is_exiting: AtomicBool::new(false),
         });
         let mut handler = self.factory.start(&client);
         let handle = tokio::spawn(async move {
+            let net_id = net.id();
+            let addr = *net.addr();
+            let (bytes_sender, bytes_receiver) = mpsc::channel(BYTES_CHANNEL_SIZE);
+            let mut reader = handler.connect(&mut net).await?;
+            let handle = tokio::spawn(async move {
+                let mut net = NetReceiver::new(ChannelBuffer::new(bytes_receiver), addr, net_id);
+                if let Err(e) = reader.recv(&mut net).await {
+                    error!({?net}, "Client error: {}", e);
+                }
+                net.channel_buffer.close();
+            });
+            let mut buf = [0; BYTES_BUFFER_SIZE];
             loop {
                 select! {
-                    _ = exit_receiver.changed() => break,
-                    Some(event) = request_receiver.recv() => handler.request(event, &mut net).await,
-                    res = net.ready() => {
-                        let ev = res?;
-                        if ev.is_error() || ev.is_read_closed() || ev.is_write_closed() {
-                            break;
-                        }
-                        if ev.is_readable() {
-                            handler.recv(&mut net).await?;
+                    Ok(event) = net.ready(&mut buf) => {
+                        match event {
+                            ReadyEvent::ConnectionLoss => break,
+                            ReadyEvent::None => continue,
+                            ReadyEvent::Read(v) => {
+                                if let Err(e) = bytes_sender.send(Bytes::new(buf, v)).await {
+                                    warning!("ChannelBuffer prematurely closed: {}", e);
+                                    break;
+                                }
+                            }
                         }
                     },
+                    _ = exit_receiver.changed() => break,
+                    Some(event) = request_receiver.recv() => handler.request(event, &mut net).await,
                     Some(msg) = data_receiver.recv() => unsafe {
                         handle_data(msg, &mut net).await?
                     }
                 }
             }
+            drop(bytes_sender);
+            handle.await?;
             handler.disconnect(&mut net).await?;
             Ok(())
         });
@@ -190,12 +229,14 @@ pub struct Client<E, E2> {
     exit: watch::Sender<()>,
     request_sender: mpsc::Sender<E>,
     data: mpsc::Sender<DataMsg>,
-    reply_sender: mpsc::Sender<E2>
+    reply_sender: mpsc::Sender<E2>,
+    is_exiting: AtomicBool
 }
 
 impl<E, E2> Client<E, E2> {
     /// Requests exit of the client.
     pub fn exit(&self) {
+        self.is_exiting.store(true, Relaxed);
         let _ = self.exit.send(());
     }
 
@@ -252,7 +293,10 @@ impl<E, E2> Client<E, E2> {
     /// * `msg`: the message buffer to send.
     ///
     /// returns: true if the operation has succeeded, false otherwise.
-    pub async fn send(&self, msg: &[u8]) -> bool {
+    pub async fn send(&self, msg: &[u8]) -> Result<(), crate::tcp::util::SendError> {
+        if self.is_exiting.load(Relaxed) {
+            return Err(crate::tcp::util::SendError::IsExiting);
+        }
         // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
         // consumed the pointer before returning.
         let synchro = Semaphore::new(0);
@@ -262,11 +306,11 @@ impl<E, E2> Client<E, E2> {
             buffer_size: msg.len(),
             net_id: 0
         }).await {
-            return false;
+            return Err(crate::tcp::util::SendError::Closed);
         }
         trace!("Waiting for the async task to acknowledge");
         let _ = synchro.acquire().await.unwrap();
-        true
+        Ok(())
     }
 }
 

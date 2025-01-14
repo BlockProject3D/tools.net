@@ -28,11 +28,12 @@
 
 //! Utility module for TCP client or server.
 
-use std::io::{Error, IoSlice};
+use std::fmt::{Debug, Display, Formatter};
+use std::io::{Error, ErrorKind, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, BufWriter, Interest, ReadBuf, Ready};
+use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
@@ -49,15 +50,53 @@ pub(super) struct DataMsg {
 
 unsafe impl Send for DataMsg {}
 
+/// An error type that can be thrown when sending or broadcasting to network clients.
+#[derive(Debug)]
+pub enum SendError {
+    /// The application was requested to exit.
+    IsExiting,
+
+    /// The broadcast channel is already closed.
+    Closed
+}
+
+impl Display for SendError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendError::IsExiting => f.write_str("exit requested"),
+            SendError::Closed => f.write_str("channel closed")
+        }
+    }
+}
+
+impl std::error::Error for SendError {}
+
+/// The event returned by the ready function in [Network].
+pub enum ReadyEvent {
+    /// The connection was lost, this indicates to break out of the event loop.
+    ConnectionLoss,
+
+    /// No particular event (this is used to handle false positives related to OS defects, winshit!!)
+    None,
+
+    /// Some data was read in the given buffer.
+    Read(usize)
+}
+
 /// Buffered reader/writer for a TCP stream.
 ///
 /// Warning: all reads and writes are buffered so make sure to call flush to actually write data.
-#[derive(Debug)]
 pub struct Network {
-    reader: BufReader<OwnedReadHalf>,
-    writer: BufWriter<OwnedWriteHalf>,
+    reader: OwnedReadHalf,
+    writer: OwnedWriteHalf,
     addr: SocketAddr,
     id: usize
+}
+
+impl Debug for Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Network {{ addr: {:?}, id: {:?} }}", self.addr, self.id)
+    }
 }
 
 impl Network {
@@ -75,8 +114,8 @@ impl Network {
         Network {
             id,
             addr,
-            reader: BufReader::new(reader),
-            writer: BufWriter::new(writer),
+            reader,
+            writer,
         }
     }
 
@@ -92,11 +131,31 @@ impl Network {
 
     /// Waits for a read or error event to appear on the socket.
     ///
+    /// # Arguments
+    ///
+    /// * `buf`: buffer to read into.
+    ///
     /// # Errors
     ///
     /// Returns an IO error if the operation failed.
-    pub async fn ready(&self) -> std::io::Result<Ready> {
-        self.reader.get_ref().ready(Interest::ERROR | Interest::READABLE).await
+    pub async fn ready(&self, buf: &mut [u8]) -> std::io::Result<ReadyEvent> {
+        let ev = self.reader.ready(Interest::ERROR | Interest::READABLE).await?;
+        if ev.is_write_closed() || ev.is_read_closed() || ev.is_error() {
+            return Ok(ReadyEvent::ConnectionLoss);
+        }
+        if !ev.is_readable() {
+            return Ok(ReadyEvent::None);
+        }
+        let res = self.reader.try_read(buf);
+        match res {
+            Err(e) => {
+                if e.kind() == ErrorKind::WouldBlock {
+                    return Ok(ReadyEvent::None);
+                }
+                Err(e)
+            }
+            Ok(v) => Ok(ReadyEvent::Read(v))
+        }
     }
 }
 
@@ -125,15 +184,5 @@ impl AsyncWrite for Network {
 
     fn is_write_vectored(&self) -> bool {
         self.writer.is_write_vectored()
-    }
-}
-
-impl AsyncBufRead for Network {
-    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
-        unsafe { self.map_unchecked_mut(|v| &mut v.reader).poll_fill_buf(cx) }
-    }
-
-    fn consume(self: Pin<&mut Self>, amt: usize) {
-        unsafe { self.map_unchecked_mut(|v| &mut v.reader).consume(amt) }
     }
 }

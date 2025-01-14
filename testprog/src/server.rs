@@ -28,7 +28,8 @@
 
 use std::sync::Arc;
 use bp3d_debug::debug;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use bp3d_net::tcp::NetReceiver;
 use bp3d_net::tcp::server::{ClientHandler, Factory, Handler, Server};
 use bp3d_net::tcp::util::Network;
 
@@ -47,17 +48,17 @@ impl Handler for EchoServer {
 }
 
 impl ClientHandler for EchoServer {
-    async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
-        let mut s = String::new();
-        net.read_line(&mut s).await?;
-        debug!("Received: {:?}", s);
-        if s == "exit\n" {
-            self.server.exit();
+    async fn recv(&mut self, net: &mut NetReceiver) -> std::io::Result<()> {
+        let mut buf = BufReader::new(net).lines();
+        while let Some(s) = buf.next_line().await? {
+            debug!("Received: {:?}", s);
+            if s == "exit" {
+                self.server.exit();
+                break;
+            }
+            self.server.broadcast(s.as_bytes()).await.unwrap();
+            self.server.broadcast(b"\n").await.unwrap();
         }
-        let motherfuckingrust = self.server.clone();
-        tokio::spawn(async move {
-            motherfuckingrust.broadcast(s.as_bytes()).await;
-        });
         Ok(())
     }
 }

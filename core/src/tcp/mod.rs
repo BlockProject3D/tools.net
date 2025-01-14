@@ -28,6 +28,9 @@
 
 //! TCP network utilities.
 
+const BYTES_CHANNEL_SIZE: usize = 16;
+const BYTES_BUFFER_SIZE: usize = 4096;
+
 #[cfg(feature = "tcp-client")]
 pub mod client;
 
@@ -36,3 +39,6 @@ pub mod server;
 
 #[cfg(any(feature = "tcp-client", feature = "tcp-server"))]
 pub mod util;
+
+mod buffer;
+pub use buffer::NetReceiver;

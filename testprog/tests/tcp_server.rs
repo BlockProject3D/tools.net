@@ -26,8 +26,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::sleep;
 use bp3d_net::tcp::server::Builder;
 use testprog::server::EchoServerFactory;
 
@@ -59,4 +61,21 @@ async fn basic() {
     server.join().await.unwrap();
     assert!(client1.read_exact(&mut buf).await.is_err());
     assert!(client2.read_exact(&mut buf).await.is_err());
+}
+
+#[tokio::test]
+async fn drop_error() {
+    let server = Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4243).await.unwrap();
+    let client1 = TcpStream::connect("127.0.0.1:4243").await.unwrap();
+    let client2 = TcpStream::connect("127.0.0.1:4243").await.unwrap();
+    sleep(Duration::from_millis(1000)).await; //Wait 1s to leave a chance to the server to get notified of client connect.
+    assert_eq!(server.server().cur_clients(), 2);
+    drop(client1);
+    sleep(Duration::from_millis(1000)).await; //Wait 1s to leave a chance to the server to get notified of client HUP.
+    assert_eq!(server.server().cur_clients(), 1);
+    drop(client2);
+    sleep(Duration::from_millis(1000)).await; //Wait 1s to leave a chance to the server to get notified of client HUP.
+    assert_eq!(server.server().cur_clients(), 0);
+    server.server().exit();
+    server.join().await.unwrap();
 }

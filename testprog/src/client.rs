@@ -27,15 +27,18 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use bp3d_net::tcp::client::{Client, Factory, Handler};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use bp3d_net::tcp::client::{Client, Factory, Handler, Reader};
+use bp3d_net::tcp::NetReceiver;
 use bp3d_net::tcp::util::Network;
 
+#[derive(Clone)]
 pub struct EchoClient {
     client: Arc<Client<String, String>>
 }
 
 impl Handler for EchoClient {
+    type Reader = EchoClient;
     type Request = String;
     type Reply = String;
 
@@ -45,10 +48,17 @@ impl Handler for EchoClient {
         net.flush().await.unwrap();
     }
 
-    async fn recv(&mut self, net: &mut Network) -> std::io::Result<()> {
-        let mut s = String::new();
-        net.read_line(&mut s).await?;
-        self.client.reply(s).await.unwrap();
+    async fn connect(&mut self, _: &mut Network) -> std::io::Result<Self::Reader> {
+        Ok(self.clone())
+    }
+}
+
+impl Reader for EchoClient {
+    async fn recv(&mut self, net: &mut NetReceiver) -> std::io::Result<()> {
+        let mut buf = BufReader::new(net).lines();
+        while let Some(s) = buf.next_line().await? {
+            self.client.reply(s + "\n").await.unwrap();
+        }
         Ok(())
     }
 }
