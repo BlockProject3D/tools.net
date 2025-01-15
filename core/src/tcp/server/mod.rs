@@ -30,6 +30,7 @@
 
 mod server;
 mod client;
+mod types;
 
 pub use server::{Builder, Server, ServerApp, Handler, Factory};
 pub use client::Handler as ClientHandler;

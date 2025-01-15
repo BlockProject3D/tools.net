@@ -27,14 +27,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::future::Future;
-use bp3d_debug::{error, trace, warning};
+use bp3d_debug::{error, trace};
 use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::broadcast;
-use crate::tcp::buffer::{Bytes, ChannelBuffer};
-use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
+use crate::tcp::buffer::ChannelBuffer;
+use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
 use crate::tcp::util::{DataMsg, Network, ReadyEvent};
 
 /// Represents a client event handler.
@@ -69,7 +69,7 @@ pub(crate) struct ClientTask<'a, H> {
     pub(crate) broadcast: broadcast::Receiver<DataMsg>
 }
 
-impl<'a, H: Handler + Send + 'static> ClientTask<'a, H> {
+impl<H: Handler + Send + 'static> ClientTask<'_, H> {
     pub(crate) async fn run(mut self) -> H {
         let net_id = self.net.id();
         let addr = *self.net.addr();
@@ -82,19 +82,12 @@ impl<'a, H: Handler + Send + 'static> ClientTask<'a, H> {
             net.channel_buffer.close();
             self.handler
         });
-        let mut buf = [0; BYTES_BUFFER_SIZE];
         loop {
             select! {
-                Ok(event) = self.net.ready(&mut buf) => {
+                Ok(event) = self.net.ready_read(&bytes_sender) => {
                     match event {
                         ReadyEvent::ConnectionLoss => break,
-                        ReadyEvent::None => continue,
-                        ReadyEvent::Read(v) => {
-                            if let Err(e) = bytes_sender.send(Bytes::new(buf, v)).await {
-                                warning!("ChannelBuffer prematurely closed: {}", e);
-                                break;
-                            }
-                        }
+                        ReadyEvent::None | ReadyEvent::Submitted => continue,
                     }
                 },
                 Ok(msg) = self.broadcast.recv() => unsafe {

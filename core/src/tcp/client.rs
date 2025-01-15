@@ -33,13 +33,13 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{error, trace, warning};
+use bp3d_debug::{error, trace};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
-use crate::tcp::buffer::{Bytes, ChannelBuffer};
+use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
+use crate::tcp::buffer::ChannelBuffer;
 use crate::tcp::util::{DataMsg, Network, ReadyEvent};
 
 /// The reader trait which is supposed to handle the actual data reading loop.
@@ -108,7 +108,7 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the client is about to start to create the corresponding event handler.
-    fn start(self, client: &Arc<Client<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
+    fn start(self, client: &Arc<Client<Self::Handler>>) -> Self::Handler;
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Client structure).
@@ -161,7 +161,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the client could not connect to the specified server.
-    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<F::Handler>> {
         let stream = TcpStream::connect(addr).await?;
         let addr = stream.peer_addr()?;
         let mut net = Network::new(0, stream, addr);
@@ -189,19 +189,12 @@ impl<F: Factory> Builder<F> {
                 }
                 net.channel_buffer.close();
             });
-            let mut buf = [0; BYTES_BUFFER_SIZE];
             loop {
                 select! {
-                    Ok(event) = net.ready(&mut buf) => {
+                    Ok(event) = net.ready_read(&bytes_sender) => {
                         match event {
                             ReadyEvent::ConnectionLoss => break,
-                            ReadyEvent::None => continue,
-                            ReadyEvent::Read(v) => {
-                                if let Err(e) = bytes_sender.send(Bytes::new(buf, v)).await {
-                                    warning!("ChannelBuffer prematurely closed: {}", e);
-                                    break;
-                                }
-                            }
+                            ReadyEvent::None | ReadyEvent::Submitted => continue,
                         }
                     },
                     _ = exit_receiver.changed() => break,
@@ -225,15 +218,15 @@ impl<F: Factory> Builder<F> {
 }
 
 /// Represents a client with a long-running connection.
-pub struct Client<E, E2> {
+pub struct Client<H: Handler> {
     exit: watch::Sender<()>,
-    request_sender: mpsc::Sender<E>,
+    request_sender: mpsc::Sender<H::Request>,
     data: mpsc::Sender<DataMsg>,
-    reply_sender: mpsc::Sender<E2>,
+    reply_sender: mpsc::Sender<H::Reply>,
     is_exiting: AtomicBool
 }
 
-impl<E, E2> Client<E, E2> {
+impl<H: Handler> Client<H> {
     /// Requests exit of the client.
     pub fn exit(&self) {
         self.is_exiting.store(true, Relaxed);
@@ -251,7 +244,7 @@ impl<E, E2> Client<E, E2> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn request_async(&self, event: E) -> Result<(), SendError<E>> {
+    pub async fn request_async(&self, event: H::Request) -> Result<(), SendError<H::Request>> {
         self.request_sender.send(event).await
     }
 
@@ -267,7 +260,7 @@ impl<E, E2> Client<E, E2> {
     ///
     /// Returns a TrySendError if the server has exited or if the event queue is full.
     /// See [Builder] for more information on the configuration of the event queue.
-    pub fn request(&self, event: E) -> Result<(), TrySendError<E>> {
+    pub fn request(&self, event: H::Request) -> Result<(), TrySendError<H::Request>> {
         self.request_sender.try_send(event)
     }
 
@@ -282,7 +275,7 @@ impl<E, E2> Client<E, E2> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn reply(&self, event: E2) -> Result<(), SendError<E2>> {
+    pub async fn reply(&self, event: H::Reply) -> Result<(), SendError<H::Reply>> {
         self.reply_sender.send(event).await
     }
 
@@ -300,12 +293,12 @@ impl<E, E2> Client<E, E2> {
         // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
         // consumed the pointer before returning.
         let synchro = Semaphore::new(0);
-        if let Err(_) = self.data.send(DataMsg {
+        if (self.data.send(DataMsg {
             synchro: &synchro,
             buffer: msg.as_ptr(),
             buffer_size: msg.len(),
             net_id: 0
-        }).await {
+        }).await).is_err() {
             return Err(crate::tcp::util::SendError::Closed);
         }
         trace!("Waiting for the async task to acknowledge");
@@ -315,4 +308,4 @@ impl<E, E2> Client<E, E2> {
 }
 
 /// The main client application type.
-pub type ClientApp<E, E2> = crate::util::ClientApp<Client<E, E2>, E2>;
+pub type ClientApp<H: Handler> = crate::util::ClientApp<Client<H>, H::Reply>;

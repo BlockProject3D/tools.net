@@ -33,11 +33,14 @@ use std::io::{Error, ErrorKind, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use bp3d_debug::warning;
 use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 
 use tokio::sync::Semaphore;
+use crate::tcp::buffer::Bytes;
 
 #[derive(Clone, Debug)]
 pub(super) struct DataMsg {
@@ -79,8 +82,8 @@ pub enum ReadyEvent {
     /// No particular event (this is used to handle false positives related to OS defects, winshit!!)
     None,
 
-    /// Some data was read in the given buffer.
-    Read(usize)
+    /// Data was submitted to the given ChannelBuffer channel.
+    Submitted
 }
 
 /// Buffered reader/writer for a TCP stream.
@@ -138,7 +141,7 @@ impl Network {
     /// # Errors
     ///
     /// Returns an IO error if the operation failed.
-    pub async fn ready(&self, buf: &mut [u8]) -> std::io::Result<ReadyEvent> {
+    pub async fn ready_read<const N: usize>(&self, bytes_sender: &mpsc::Sender<Bytes<N>>) -> std::io::Result<ReadyEvent> {
         let ev = self.reader.ready(Interest::ERROR | Interest::READABLE).await?;
         if ev.is_write_closed() || ev.is_read_closed() || ev.is_error() {
             return Ok(ReadyEvent::ConnectionLoss);
@@ -146,7 +149,8 @@ impl Network {
         if !ev.is_readable() {
             return Ok(ReadyEvent::None);
         }
-        let res = self.reader.try_read(buf);
+        let mut buf = [0; N];
+        let res = self.reader.try_read(&mut buf);
         match res {
             Err(e) => {
                 if e.kind() == ErrorKind::WouldBlock {
@@ -154,7 +158,13 @@ impl Network {
                 }
                 Err(e)
             }
-            Ok(v) => Ok(ReadyEvent::Read(v))
+            Ok(v) => {
+                if let Err(e) = bytes_sender.send(Bytes::new(buf, v)).await {
+                    warning!("ChannelBuffer prematurely closed: {}", e);
+                    return Ok(ReadyEvent::ConnectionLoss);
+                }
+                Ok(ReadyEvent::Submitted)
+            }
         }
     }
 }

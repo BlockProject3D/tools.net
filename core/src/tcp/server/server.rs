@@ -49,7 +49,7 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the server is about to start to create the corresponding event handler.
-    fn start(self, server: &Arc<Server<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
+    fn start(self, server: &Arc<Server<Self::Handler>>) -> Self::Handler;
 }
 
 /// A trait which represents the main server event handler.
@@ -106,7 +106,7 @@ struct ServerTask<H: Handler> {
     listener: TcpListener,
     exit_receiver: watch::Receiver<()>,
     request_receiver: mpsc::Receiver<H::Request>,
-    server: Arc<Server<H::Request, H::Reply>>
+    server: Arc<Server<H>>
 }
 
 impl<H: Handler + Send + 'static> ServerTask<H> {
@@ -218,7 +218,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<F::Handler>> {
         self.bind((Ipv4Addr::UNSPECIFIED, port)).await
     }
 
@@ -233,7 +233,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<F::Handler>> {
         self.bind((Ipv4Addr::LOCALHOST, port)).await
     }
 
@@ -248,7 +248,7 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<F::Handler>> {
         let listener = TcpListener::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
         let (brd_sender, _) = broadcast::channel(self.max_clients);
@@ -284,17 +284,17 @@ impl<F: Factory> Builder<F> {
 }
 
 /// Represents a running server.
-pub struct Server<E, E2> {
+pub struct Server<H: Handler> {
     exit: watch::Sender<()>,
     broadcast: broadcast::Sender<DataMsg>,
     cur_clients: AtomicUsize,
     max_clients: usize,
-    request_sender: mpsc::Sender<E>,
-    reply_sender: mpsc::Sender<E2>,
+    request_sender: mpsc::Sender<H::Request>,
+    reply_sender: mpsc::Sender<H::Reply>,
     is_exiting: AtomicBool
 }
 
-impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
+impl<H: Handler> Server<H> {
     /// Returns the maximum number of clients allowed at the same time.
     pub fn max_clients(&self) -> usize {
         self.max_clients
@@ -322,7 +322,7 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn request_async(&self, event: E) -> Result<(), SendError<E>> {
+    pub async fn request_async(&self, event: H::Request) -> Result<(), SendError<H::Request>> {
         self.request_sender.send(event).await
     }
 
@@ -338,7 +338,7 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     ///
     /// Returns a TrySendError if the server has exited or if the event queue is full.
     /// See [Builder] for more information on the configuration of the event queue.
-    pub fn request(&self, event: E) -> Result<(), TrySendError<E>> {
+    pub fn request(&self, event: H::Request) -> Result<(), TrySendError<H::Request>> {
         self.request_sender.try_send(event)
     }
 
@@ -353,7 +353,7 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
     /// # Errors
     ///
     /// Returns a SendError if the server has exited.
-    pub async fn reply(&self, event: E2) -> Result<(), SendError<E2>> {
+    pub async fn reply(&self, event: H::Reply) -> Result<(), SendError<H::Reply>> {
         self.reply_sender.send(event).await
     }
 
@@ -420,4 +420,4 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
 }
 
 /// The main server application type.
-pub type ServerApp<E, E2> = crate::util::ServerApp<Server<E, E2>, E2>;
+pub type ServerApp<H: Handler> = crate::util::ServerApp<Server<H>, H::Reply>;

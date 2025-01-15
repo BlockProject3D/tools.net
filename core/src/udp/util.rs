@@ -59,7 +59,7 @@ impl<'a> Datagram<'a> {
     }
 }
 
-impl<'a> Deref for Datagram<'a> {
+impl Deref for Datagram<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {

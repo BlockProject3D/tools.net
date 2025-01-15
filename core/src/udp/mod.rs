@@ -31,7 +31,7 @@
 #[cfg(feature = "udp-server")]
 pub mod server;
 
-#[cfg(any(feature = "udp-server"))]
+#[cfg(feature = "udp-server")]
 pub mod util;
 
 #[cfg(feature = "udp-client")]
