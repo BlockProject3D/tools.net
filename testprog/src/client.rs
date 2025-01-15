@@ -34,7 +34,7 @@ use bp3d_net::tcp::util::Network;
 
 #[derive(Clone)]
 pub struct EchoClient {
-    client: Arc<Client<String, String>>
+    client: Arc<Client<EchoClient>>
 }
 
 impl Handler for EchoClient {
@@ -68,7 +68,7 @@ pub struct EchoClientFactory;
 impl Factory for EchoClientFactory {
     type Handler = EchoClient;
 
-    fn start(self, client: &Arc<Client<String, String>>) -> Self::Handler {
+    fn start(self, client: &Arc<Client<EchoClient>>) -> Self::Handler {
         EchoClient {
             client: client.clone()
         }

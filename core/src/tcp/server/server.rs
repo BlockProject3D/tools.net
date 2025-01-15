@@ -420,4 +420,4 @@ impl<H: Handler> Server<H> {
 }
 
 /// The main server application type.
-pub type ServerApp<H: Handler> = crate::util::ServerApp<Server<H>, H::Reply>;
+pub type ServerApp<H> = crate::util::ServerApp<Server<H>, <H as Handler>::Reply>;

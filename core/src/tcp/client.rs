@@ -308,4 +308,4 @@ impl<H: Handler> Client<H> {
 }
 
 /// The main client application type.
-pub type ClientApp<H: Handler> = crate::util::ClientApp<Client<H>, H::Reply>;
+pub type ClientApp<H> = crate::util::ClientApp<Client<H>, <H as Handler>::Reply>;
