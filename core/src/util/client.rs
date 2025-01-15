@@ -34,7 +34,7 @@ use tokio::task::JoinHandle;
 pub struct ClientApp<Client, Reply> {
     pub(crate) handle: JoinHandle<std::io::Result<()>>,
     pub(crate) client: Arc<Client>,
-    pub(crate) reply_receiver: mpsc::Receiver<Reply>
+    pub(crate) reply_receiver: mpsc::Receiver<Reply>,
 }
 
 impl<Client, Reply> ClientApp<Client, Reply> {

@@ -34,7 +34,7 @@ use std::ops::Deref;
 /// An UDP datagram.
 pub struct Datagram<'a> {
     peer_addr: SocketAddr,
-    buffer: &'a [u8]
+    buffer: &'a [u8],
 }
 
 impl<'a> Datagram<'a> {
@@ -47,10 +47,7 @@ impl<'a> Datagram<'a> {
     ///
     /// returns: Datagram
     pub fn new(peer_addr: SocketAddr, buffer: &'a [u8]) -> Self {
-        Self {
-            peer_addr,
-            buffer
-        }
+        Self { peer_addr, buffer }
     }
 
     /// Returns the address of the peer this datagram comes from or is intended for.

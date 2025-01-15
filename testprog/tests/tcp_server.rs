@@ -26,16 +26,20 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use bp3d_net::tcp::server::Builder;
 use std::time::Duration;
+use testprog::server::EchoServerFactory;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use bp3d_net::tcp::server::Builder;
-use testprog::server::EchoServerFactory;
 
 #[tokio::test]
 async fn basic() {
-    let server = Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4242).await.unwrap();
+    let server = Builder::new(EchoServerFactory)
+        .max_clients(5)
+        .bind_local_port(4242)
+        .await
+        .unwrap();
     let mut client1 = TcpStream::connect("127.0.0.1:4242").await.unwrap();
     let mut client2 = TcpStream::connect("127.0.0.1:4242").await.unwrap();
     let mut buf = [0; 12];
@@ -65,7 +69,11 @@ async fn basic() {
 
 #[tokio::test]
 async fn drop_error() {
-    let server = Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4243).await.unwrap();
+    let server = Builder::new(EchoServerFactory)
+        .max_clients(5)
+        .bind_local_port(4243)
+        .await
+        .unwrap();
     let client1 = TcpStream::connect("127.0.0.1:4243").await.unwrap();
     let client2 = TcpStream::connect("127.0.0.1:4243").await.unwrap();
     sleep(Duration::from_millis(1000)).await; //Wait 1s to leave a chance to the server to get notified of client connect.

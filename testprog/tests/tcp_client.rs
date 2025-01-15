@@ -26,27 +26,61 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use bp3d_net::tcp::server;
 use bp3d_net::tcp::client;
+use bp3d_net::tcp::server;
 use testprog::client::EchoClientFactory;
 use testprog::server::EchoServerFactory;
 
 #[tokio::test]
 async fn basic() {
-    let server = server::Builder::new(EchoServerFactory).max_clients(5).bind_local_port(4242).await.unwrap();
-    let mut client1 = client::Builder::new(EchoClientFactory).connect("127.0.0.1:4242").await.unwrap();
-    let mut client2 = client::Builder::new(EchoClientFactory).connect("127.0.0.1:4242").await.unwrap();
+    let server = server::Builder::new(EchoServerFactory)
+        .max_clients(5)
+        .bind_local_port(4242)
+        .await
+        .unwrap();
+    let mut client1 = client::Builder::new(EchoClientFactory)
+        .connect("127.0.0.1:4242")
+        .await
+        .unwrap();
+    let mut client2 = client::Builder::new(EchoClientFactory)
+        .connect("127.0.0.1:4242")
+        .await
+        .unwrap();
     {
-        client1.client().request_async(String::from("hello world")).await.unwrap();
-        assert_eq!(client1.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
-        assert_eq!(client2.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
+        client1
+            .client()
+            .request_async(String::from("hello world"))
+            .await
+            .unwrap();
+        assert_eq!(
+            client1.get_reply_async().await.unwrap().as_bytes(),
+            b"hello world\n"
+        );
+        assert_eq!(
+            client2.get_reply_async().await.unwrap().as_bytes(),
+            b"hello world\n"
+        );
     }
     {
-        client2.client().request_async(String::from("hello world")).await.unwrap();
-        assert_eq!(client1.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
-        assert_eq!(client2.get_reply_async().await.unwrap().as_bytes(), b"hello world\n");
+        client2
+            .client()
+            .request_async(String::from("hello world"))
+            .await
+            .unwrap();
+        assert_eq!(
+            client1.get_reply_async().await.unwrap().as_bytes(),
+            b"hello world\n"
+        );
+        assert_eq!(
+            client2.get_reply_async().await.unwrap().as_bytes(),
+            b"hello world\n"
+        );
     }
-    client1.client().request_async(String::from("exit")).await.unwrap();
+    client1
+        .client()
+        .request_async(String::from("exit"))
+        .await
+        .unwrap();
     server.join().await.unwrap();
     client1.join().await.unwrap();
     client2.join().await.unwrap();
