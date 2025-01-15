@@ -6,7 +6,7 @@ edition = "2021"
 description = "Network utilities."
 license = "BSD-3-Clause"
 repository = "https://github.com/BlockProject3D/tools.net"
-readme = "./README.MD"
+readme = "../README.MD"
 keywords = ["bp3d", "network", "utilities"]
 categories = ["asynchronous", "network-programming"]
 
