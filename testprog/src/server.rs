@@ -26,12 +26,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
 use bp3d_debug::debug;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use bp3d_net::tcp::NetReceiver;
 use bp3d_net::tcp::server::{ClientHandler, Factory, Handler, Server};
 use bp3d_net::tcp::util::Network;
+use bp3d_net::tcp::NetReceiver;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub struct EchoServer {
     server: Arc<Server<EchoServer>>,
@@ -43,7 +43,9 @@ impl Handler for EchoServer {
     type Reply = ();
 
     async fn connect(&mut self, _: &mut Network) -> std::io::Result<Self::ClientHandler> {
-        Ok(EchoServer { server: self.server.clone() })
+        Ok(EchoServer {
+            server: self.server.clone(),
+        })
     }
 }
 
@@ -69,6 +71,8 @@ impl Factory for EchoServerFactory {
     type Handler = EchoServer;
 
     fn start(self, server: &Arc<Server<EchoServer>>) -> Self::Handler {
-        EchoServer { server: server.clone() }
+        EchoServer {
+            server: server.clone(),
+        }
     }
 }

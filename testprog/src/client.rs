@@ -26,15 +26,15 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use bp3d_net::tcp::client::{Client, Factory, Handler, Reader};
+use bp3d_net::tcp::util::Network;
+use bp3d_net::tcp::NetReceiver;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use bp3d_net::tcp::client::{Client, Factory, Handler, Reader};
-use bp3d_net::tcp::NetReceiver;
-use bp3d_net::tcp::util::Network;
 
 #[derive(Clone)]
 pub struct EchoClient {
-    client: Arc<Client<EchoClient>>
+    client: Arc<Client<EchoClient>>,
 }
 
 impl Handler for EchoClient {
@@ -70,7 +70,7 @@ impl Factory for EchoClientFactory {
 
     fn start(self, client: &Arc<Client<EchoClient>>) -> Self::Handler {
         EchoClient {
-            client: client.clone()
+            client: client.clone(),
         }
     }
 }

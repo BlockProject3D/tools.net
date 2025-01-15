@@ -28,19 +28,19 @@
 
 //! A basic TCP client implementation designed for long-running connections.
 
-use tokio::sync::{mpsc, watch, Semaphore};
+use crate::tcp::buffer::ChannelBuffer;
+use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
+use bp3d_debug::{error, trace};
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{error, trace};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
-use crate::tcp::buffer::ChannelBuffer;
-use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+use tokio::sync::{mpsc, watch, Semaphore};
 
 /// The reader trait which is supposed to handle the actual data reading loop.
 pub trait Reader {
@@ -86,7 +86,10 @@ pub trait Handler {
     /// * `net`: the network context created for this client.
     ///
     /// returns: impl Future<Output=Result<Self::Reader, Error>>+Send+Sized
-    fn connect(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<Self::Reader>> + Send;
+    fn connect(
+        &mut self,
+        net: &mut Network,
+    ) -> impl Future<Output = std::io::Result<Self::Reader>> + Send;
 
     /// Called when the client task is about to return.
     ///
@@ -96,9 +99,7 @@ pub trait Handler {
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
     fn disconnect(&mut self, _: &mut Network) -> impl Future<Output = std::io::Result<()>> + Send {
-        async move {
-            Ok(())
-        }
+        async move { Ok(()) }
     }
 }
 
@@ -124,7 +125,7 @@ async unsafe fn handle_data(msg: DataMsg, net: &mut Network) -> std::io::Result<
 /// The main builder structure used to create a new TCP client.
 pub struct Builder<F> {
     factory: F,
-    event_queue_size: usize
+    event_queue_size: usize,
 }
 
 impl<F: Factory> Builder<F> {
@@ -132,7 +133,7 @@ impl<F: Factory> Builder<F> {
     pub fn new(factory: F) -> Builder<F> {
         Self {
             factory,
-            event_queue_size: 4
+            event_queue_size: 4,
         }
     }
 
@@ -212,7 +213,7 @@ impl<F: Factory> Builder<F> {
         Ok(ClientApp {
             client,
             handle,
-            reply_receiver
+            reply_receiver,
         })
     }
 }
@@ -223,7 +224,7 @@ pub struct Client<H: Handler> {
     request_sender: mpsc::Sender<H::Request>,
     data: mpsc::Sender<DataMsg>,
     reply_sender: mpsc::Sender<H::Reply>,
-    is_exiting: AtomicBool
+    is_exiting: AtomicBool,
 }
 
 impl<H: Handler> Client<H> {
@@ -293,12 +294,17 @@ impl<H: Handler> Client<H> {
         // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
         // consumed the pointer before returning.
         let synchro = Semaphore::new(0);
-        if (self.data.send(DataMsg {
-            synchro: &synchro,
-            buffer: msg.as_ptr(),
-            buffer_size: msg.len(),
-            net_id: 0
-        }).await).is_err() {
+        if (self
+            .data
+            .send(DataMsg {
+                synchro: &synchro,
+                buffer: msg.as_ptr(),
+                buffer_size: msg.len(),
+                net_id: 0,
+            })
+            .await)
+            .is_err()
+        {
             return Err(crate::tcp::util::SendError::Closed);
         }
         trace!("Waiting for the async task to acknowledge");

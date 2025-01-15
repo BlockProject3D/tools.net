@@ -26,22 +26,22 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::tcp::server::client::ClientTask;
+use crate::tcp::util::{DataMsg, Network};
+use bp3d_debug::{debug, trace};
 use std::future::Future;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{debug, trace};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::select;
-use tokio::sync::{watch, Semaphore};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
-use crate::tcp::server::client::ClientTask;
-use crate::tcp::util::{DataMsg, Network};
 
 /// A factory trait which can be used to create the instance of the main server event handler.
 pub trait Factory {
@@ -83,7 +83,10 @@ pub trait Handler {
     /// * `net`: the network context created for this client.
     ///
     /// returns: impl Future<Output=Result<Self::ClientHandler, Error>>+Send+Sized
-    fn connect(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<Self::ClientHandler>> + Send;
+    fn connect(
+        &mut self,
+        net: &mut Network,
+    ) -> impl Future<Output = std::io::Result<Self::ClientHandler>> + Send;
 
     /// Called when a client has disconnected from the server.
     ///
@@ -96,7 +99,11 @@ pub trait Handler {
     /// * `handler`: the client event handler which was associated with the client.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn disconnect(&mut self, _: &mut Network, _: Self::ClientHandler) -> impl Future<Output = ()> + Send {
+    fn disconnect(
+        &mut self,
+        _: &mut Network,
+        _: Self::ClientHandler,
+    ) -> impl Future<Output = ()> + Send {
         async move {}
     }
 }
@@ -106,7 +113,7 @@ struct ServerTask<H: Handler> {
     listener: TcpListener,
     exit_receiver: watch::Receiver<()>,
     request_receiver: mpsc::Receiver<H::Request>,
-    server: Arc<Server<H>>
+    server: Arc<Server<H>>,
 }
 
 impl<H: Handler + Send + 'static> ServerTask<H> {
@@ -271,14 +278,14 @@ impl<F: Factory> Builder<F> {
                 listener,
                 exit_receiver,
                 request_receiver,
-                server
+                server,
             };
             task.run().await
         });
         Ok(ServerApp {
             handle,
             server: motherfuckingrust,
-            reply_receiver
+            reply_receiver,
         })
     }
 }
@@ -291,7 +298,7 @@ pub struct Server<H: Handler> {
     max_clients: usize,
     request_sender: mpsc::Sender<H::Request>,
     reply_sender: mpsc::Sender<H::Reply>,
-    is_exiting: AtomicBool
+    is_exiting: AtomicBool,
 }
 
 impl<H: Handler> Server<H> {
@@ -376,10 +383,10 @@ impl<H: Handler> Server<H> {
             synchro: &synchro,
             buffer: msg.as_ptr(),
             buffer_size: msg.len(),
-            net_id
+            net_id,
         }) {
             Err(_) => return Err(crate::tcp::util::SendError::Closed),
-            Ok(v) => debug!("Broadcasting to {} client(s)", v)
+            Ok(v) => debug!("Broadcasting to {} client(s)", v),
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);
@@ -406,10 +413,10 @@ impl<H: Handler> Server<H> {
             synchro: &synchro,
             buffer: msg.as_ptr(),
             buffer_size: msg.len(),
-            net_id: 0
+            net_id: 0,
         }) {
             Err(_) => return Err(crate::tcp::util::SendError::Closed),
-            Ok(v) => debug!("Broadcasting to {} client(s)", v)
+            Ok(v) => debug!("Broadcasting to {} client(s)", v),
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);
