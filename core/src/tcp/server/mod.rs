@@ -28,8 +28,8 @@
 
 //! A multi-client TCP server implementation designed for long-running connections.
 
-mod server;
 mod client;
+mod server;
 
-pub use server::{Builder, Server, ServerApp, Handler, Factory};
 pub use client::Handler as ClientHandler;
+pub use server::{Builder, Factory, Handler, Server, ServerApp};

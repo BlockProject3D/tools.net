@@ -32,9 +32,9 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use tokio::select;
-use tokio::sync::watch;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::watch;
 
 /// A trait which represents the main server event handler.
 pub trait Handler {
@@ -52,7 +52,11 @@ pub trait Handler {
     /// * `datagram`: the received datagram.
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
-    fn recv(&mut self, client: &Client<Self::Request, Self::Reply>, datagram: &[u8]) -> impl Future<Output = std::io::Result<()>> + Send;
+    fn recv(
+        &mut self,
+        client: &Client<Self::Request, Self::Reply>,
+        datagram: &[u8],
+    ) -> impl Future<Output = std::io::Result<()>> + Send;
 
     /// Called when a request event was received by the client.
     ///
@@ -62,8 +66,12 @@ pub trait Handler {
     /// * `event`: the received event.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn request(&mut self, _: &Client<Self::Request, Self::Reply>, _: Self::Request) -> impl Future<Output = ()> + Send {
-        async move { }
+    fn request(
+        &mut self,
+        _: &Client<Self::Request, Self::Reply>,
+        _: Self::Request,
+    ) -> impl Future<Output = ()> + Send {
+        async move {}
     }
 }
 
@@ -72,7 +80,7 @@ struct ClientTask<H: Handler, const N: usize> {
     exit_receiver: watch::Receiver<()>,
     request_receiver: mpsc::Receiver<H::Request>,
     buffer: [u8; N],
-    handler: H
+    handler: H,
 }
 
 impl<H: Handler + Send + 'static, const N: usize> ClientTask<H, N> {
@@ -95,7 +103,7 @@ impl<H: Handler + Send + 'static, const N: usize> ClientTask<H, N> {
 pub struct Builder<H, const N: usize> {
     handler: H,
     event_queue_size: usize,
-    init_buffer: [u8; N]
+    init_buffer: [u8; N],
 }
 
 impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
@@ -104,7 +112,7 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
         Self {
             handler,
             event_queue_size: 4,
-            init_buffer
+            init_buffer,
         }
     }
 
@@ -136,7 +144,10 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<H::Request, H::Reply>> {
+    pub async fn connect(
+        self,
+        addr: impl ToSocketAddrs,
+    ) -> std::io::Result<ClientApp<H::Request, H::Reply>> {
         let socket = UdpSocket::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
         let (request_sender, request_receiver) = mpsc::channel(self.event_queue_size);
@@ -145,7 +156,7 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
             socket,
             exit: exit_sender,
             request_sender,
-            reply_sender
+            reply_sender,
         });
         let motherfuckingrust = client.clone();
         let handle = tokio::spawn(async move {
@@ -154,14 +165,14 @@ impl<H: Handler + Send + 'static, const N: usize> Builder<H, N> {
                 exit_receiver,
                 request_receiver,
                 buffer: self.init_buffer,
-                handler: self.handler
+                handler: self.handler,
             };
             task.run().await
         });
         Ok(ClientApp {
             client: motherfuckingrust,
             handle,
-            reply_receiver
+            reply_receiver,
         })
     }
 }
@@ -171,7 +182,7 @@ pub struct Client<E, E2> {
     socket: UdpSocket,
     exit: watch::Sender<()>,
     request_sender: mpsc::Sender<E>,
-    reply_sender: mpsc::Sender<E2>
+    reply_sender: mpsc::Sender<E2>,
 }
 
 impl<E, E2> Client<E, E2> {

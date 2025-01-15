@@ -26,16 +26,16 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::future::Future;
+use crate::tcp::buffer::{Bytes, ChannelBuffer};
+use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
 use bp3d_debug::{error, trace, warning};
+use std::future::Future;
 use tokio::io::AsyncWriteExt;
 use tokio::select;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::sync::broadcast;
-use crate::tcp::buffer::{Bytes, ChannelBuffer};
-use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
-use crate::tcp::util::{DataMsg, Network, ReadyEvent};
 
 /// Represents a client event handler.
 pub trait Handler {
@@ -56,9 +56,7 @@ pub trait Handler {
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
     fn disconnect(&mut self, _: &mut Network) -> impl Future<Output = std::io::Result<()>> + Send {
-        async move {
-            Ok(())
-        }
+        async move { Ok(()) }
     }
 }
 
@@ -66,7 +64,7 @@ pub(crate) struct ClientTask<'a, H> {
     pub(crate) net: &'a mut Network,
     pub(crate) handler: H,
     pub(crate) exit: watch::Receiver<()>,
-    pub(crate) broadcast: broadcast::Receiver<DataMsg>
+    pub(crate) broadcast: broadcast::Receiver<DataMsg>,
 }
 
 impl<'a, H: Handler + Send + 'static> ClientTask<'a, H> {

@@ -26,22 +26,22 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::tcp::server::client::ClientTask;
+use crate::tcp::util::{DataMsg, Network};
+use bp3d_debug::{debug, trace};
 use std::future::Future;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{debug, trace};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::select;
-use tokio::sync::{watch, Semaphore};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
-use crate::tcp::server::client::ClientTask;
-use crate::tcp::util::{DataMsg, Network};
 
 /// A factory trait which can be used to create the instance of the main server event handler.
 pub trait Factory {
@@ -49,7 +49,12 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the server is about to start to create the corresponding event handler.
-    fn start(self, server: &Arc<Server<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
+    fn start(
+        self,
+        server: &Arc<
+            Server<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>,
+        >,
+    ) -> Self::Handler;
 }
 
 /// A trait which represents the main server event handler.
@@ -83,7 +88,10 @@ pub trait Handler {
     /// * `net`: the network context created for this client.
     ///
     /// returns: impl Future<Output=Result<Self::ClientHandler, Error>>+Send+Sized
-    fn connect(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<Self::ClientHandler>> + Send;
+    fn connect(
+        &mut self,
+        net: &mut Network,
+    ) -> impl Future<Output = std::io::Result<Self::ClientHandler>> + Send;
 
     /// Called when a client has disconnected from the server.
     ///
@@ -96,7 +104,11 @@ pub trait Handler {
     /// * `handler`: the client event handler which was associated with the client.
     ///
     /// returns: impl Future<Output=()>+Send+Sized
-    fn disconnect(&mut self, _: &mut Network, _: Self::ClientHandler) -> impl Future<Output = ()> + Send {
+    fn disconnect(
+        &mut self,
+        _: &mut Network,
+        _: Self::ClientHandler,
+    ) -> impl Future<Output = ()> + Send {
         async move {}
     }
 }
@@ -106,7 +118,7 @@ struct ServerTask<H: Handler> {
     listener: TcpListener,
     exit_receiver: watch::Receiver<()>,
     request_receiver: mpsc::Receiver<H::Request>,
-    server: Arc<Server<H::Request, H::Reply>>
+    server: Arc<Server<H::Request, H::Reply>>,
 }
 
 impl<H: Handler + Send + 'static> ServerTask<H> {
@@ -218,7 +230,11 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind_port(
+        self,
+        port: u16,
+    ) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>>
+    {
         self.bind((Ipv4Addr::UNSPECIFIED, port)).await
     }
 
@@ -233,7 +249,11 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind_local_port(self, port: u16) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind_local_port(
+        self,
+        port: u16,
+    ) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>>
+    {
         self.bind((Ipv4Addr::LOCALHOST, port)).await
     }
 
@@ -248,7 +268,11 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the server could not be bound or started.
-    pub async fn bind(self, addr: impl ToSocketAddrs) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn bind(
+        self,
+        addr: impl ToSocketAddrs,
+    ) -> std::io::Result<ServerApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>>
+    {
         let listener = TcpListener::bind(addr).await?;
         let (exit_sender, exit_receiver) = watch::channel(());
         let (brd_sender, _) = broadcast::channel(self.max_clients);
@@ -271,14 +295,14 @@ impl<F: Factory> Builder<F> {
                 listener,
                 exit_receiver,
                 request_receiver,
-                server
+                server,
             };
             task.run().await
         });
         Ok(ServerApp {
             handle,
             server: motherfuckingrust,
-            reply_receiver
+            reply_receiver,
         })
     }
 }
@@ -291,7 +315,7 @@ pub struct Server<E, E2> {
     max_clients: usize,
     request_sender: mpsc::Sender<E>,
     reply_sender: mpsc::Sender<E2>,
-    is_exiting: AtomicBool
+    is_exiting: AtomicBool,
 }
 
 impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
@@ -376,10 +400,10 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
             synchro: &synchro,
             buffer: msg.as_ptr(),
             buffer_size: msg.len(),
-            net_id
+            net_id,
         }) {
             Err(_) => return Err(crate::tcp::util::SendError::Closed),
-            Ok(v) => debug!("Broadcasting to {} client(s)", v)
+            Ok(v) => debug!("Broadcasting to {} client(s)", v),
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);
@@ -406,10 +430,10 @@ impl<E: Send + 'static, E2: Send + 'static> Server<E, E2> {
             synchro: &synchro,
             buffer: msg.as_ptr(),
             buffer_size: msg.len(),
-            net_id: 0
+            net_id: 0,
         }) {
             Err(_) => return Err(crate::tcp::util::SendError::Closed),
-            Ok(v) => debug!("Broadcasting to {} client(s)", v)
+            Ok(v) => debug!("Broadcasting to {} client(s)", v),
         }
         let clients = self.cur_clients.load(Relaxed);
         trace!("Waiting for {} client(s) to acknowledge", clients);

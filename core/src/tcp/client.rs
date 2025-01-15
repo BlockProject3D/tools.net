@@ -28,19 +28,19 @@
 
 //! A basic TCP client implementation designed for long-running connections.
 
-use tokio::sync::{mpsc, watch, Semaphore};
+use crate::tcp::buffer::{Bytes, ChannelBuffer};
+use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
+use bp3d_debug::{error, trace, warning};
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::{error, trace, warning};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use crate::tcp::{NetReceiver, BYTES_BUFFER_SIZE, BYTES_CHANNEL_SIZE};
-use crate::tcp::buffer::{Bytes, ChannelBuffer};
-use crate::tcp::util::{DataMsg, Network, ReadyEvent};
+use tokio::sync::{mpsc, watch, Semaphore};
 
 /// The reader trait which is supposed to handle the actual data reading loop.
 pub trait Reader {
@@ -86,7 +86,10 @@ pub trait Handler {
     /// * `net`: the network context created for this client.
     ///
     /// returns: impl Future<Output=Result<Self::Reader, Error>>+Send+Sized
-    fn connect(&mut self, net: &mut Network) -> impl Future<Output = std::io::Result<Self::Reader>> + Send;
+    fn connect(
+        &mut self,
+        net: &mut Network,
+    ) -> impl Future<Output = std::io::Result<Self::Reader>> + Send;
 
     /// Called when the client task is about to return.
     ///
@@ -96,9 +99,7 @@ pub trait Handler {
     ///
     /// returns: impl Future<Output=Result<(), Error>>+Send+Sized
     fn disconnect(&mut self, _: &mut Network) -> impl Future<Output = std::io::Result<()>> + Send {
-        async move {
-            Ok(())
-        }
+        async move { Ok(()) }
     }
 }
 
@@ -108,7 +109,12 @@ pub trait Factory {
     type Handler: Handler + Send + 'static;
 
     /// Called when the client is about to start to create the corresponding event handler.
-    fn start(self, client: &Arc<Client<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>>) -> Self::Handler;
+    fn start(
+        self,
+        client: &Arc<
+            Client<<Self::Handler as Handler>::Request, <Self::Handler as Handler>::Reply>,
+        >,
+    ) -> Self::Handler;
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Client structure).
@@ -124,7 +130,7 @@ async unsafe fn handle_data(msg: DataMsg, net: &mut Network) -> std::io::Result<
 /// The main builder structure used to create a new TCP client.
 pub struct Builder<F> {
     factory: F,
-    event_queue_size: usize
+    event_queue_size: usize,
 }
 
 impl<F: Factory> Builder<F> {
@@ -132,7 +138,7 @@ impl<F: Factory> Builder<F> {
     pub fn new(factory: F) -> Builder<F> {
         Self {
             factory,
-            event_queue_size: 4
+            event_queue_size: 4,
         }
     }
 
@@ -161,7 +167,11 @@ impl<F: Factory> Builder<F> {
     /// # Errors
     ///
     /// Returns an IO error if the client could not connect to the specified server.
-    pub async fn connect(self, addr: impl ToSocketAddrs) -> std::io::Result<ClientApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>> {
+    pub async fn connect(
+        self,
+        addr: impl ToSocketAddrs,
+    ) -> std::io::Result<ClientApp<<F::Handler as Handler>::Request, <F::Handler as Handler>::Reply>>
+    {
         let stream = TcpStream::connect(addr).await?;
         let addr = stream.peer_addr()?;
         let mut net = Network::new(0, stream, addr);
@@ -219,7 +229,7 @@ impl<F: Factory> Builder<F> {
         Ok(ClientApp {
             client,
             handle,
-            reply_receiver
+            reply_receiver,
         })
     }
 }
@@ -230,7 +240,7 @@ pub struct Client<E, E2> {
     request_sender: mpsc::Sender<E>,
     data: mpsc::Sender<DataMsg>,
     reply_sender: mpsc::Sender<E2>,
-    is_exiting: AtomicBool
+    is_exiting: AtomicBool,
 }
 
 impl<E, E2> Client<E, E2> {
@@ -300,12 +310,16 @@ impl<E, E2> Client<E, E2> {
         // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
         // consumed the pointer before returning.
         let synchro = Semaphore::new(0);
-        if let Err(_) = self.data.send(DataMsg {
-            synchro: &synchro,
-            buffer: msg.as_ptr(),
-            buffer_size: msg.len(),
-            net_id: 0
-        }).await {
+        if let Err(_) = self
+            .data
+            .send(DataMsg {
+                synchro: &synchro,
+                buffer: msg.as_ptr(),
+                buffer_size: msg.len(),
+                net_id: 0,
+            })
+            .await
+        {
             return Err(crate::tcp::util::SendError::Closed);
         }
         trace!("Waiting for the async task to acknowledge");

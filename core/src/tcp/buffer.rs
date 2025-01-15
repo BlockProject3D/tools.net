@@ -26,6 +26,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::tcp::BYTES_BUFFER_SIZE;
 use std::fmt::{Debug, Formatter};
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
@@ -34,7 +35,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::mpsc;
-use crate::tcp::BYTES_BUFFER_SIZE;
 
 pub struct Bytes<const N: usize> {
     bytes: [u8; N],
@@ -56,7 +56,7 @@ impl<const N: usize> Deref for Bytes<N> {
 }
 
 pub struct ChannelBuffer<const N: usize> {
-    receiver: mpsc::Receiver<Bytes<N>>
+    receiver: mpsc::Receiver<Bytes<N>>,
 }
 
 impl<const N: usize> ChannelBuffer<N> {
@@ -70,19 +70,24 @@ impl<const N: usize> ChannelBuffer<N> {
 }
 
 impl<const N: usize> AsyncRead for ChannelBuffer<N> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         let msg = self.receiver.poll_recv(cx);
         match msg {
-            Poll::Ready(v) => {
-                match v {
-                    Some(bytes) => {
-                        buf.put_slice(&bytes);
-                        Poll::Ready(Ok(()))
-                    }
-                    None => Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "channel buffer is closed"))),
+            Poll::Ready(v) => match v {
+                Some(bytes) => {
+                    buf.put_slice(&bytes);
+                    Poll::Ready(Ok(()))
                 }
-            }
-            Poll::Pending => Poll::Pending
+                None => Poll::Ready(Err(Error::new(
+                    ErrorKind::BrokenPipe,
+                    "channel buffer is closed",
+                ))),
+            },
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -91,12 +96,16 @@ impl<const N: usize> AsyncRead for ChannelBuffer<N> {
 pub struct NetReceiver {
     pub(super) channel_buffer: ChannelBuffer<BYTES_BUFFER_SIZE>,
     addr: SocketAddr,
-    id: usize
+    id: usize,
 }
 
 impl Debug for NetReceiver {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NetReceiver {{ addr: {:?}, id: {:?} }}", self.addr, self.id)
+        write!(
+            f,
+            "NetReceiver {{ addr: {:?}, id: {:?} }}",
+            self.addr, self.id
+        )
     }
 }
 
@@ -110,8 +119,16 @@ impl NetReceiver {
     /// * `id`: the network id associated to the client.
     ///
     /// returns: NetReceiver
-    pub fn new(channel_buffer: ChannelBuffer<BYTES_BUFFER_SIZE>, addr: SocketAddr, id: usize) -> Self {
-        Self { channel_buffer, addr, id }
+    pub fn new(
+        channel_buffer: ChannelBuffer<BYTES_BUFFER_SIZE>,
+        addr: SocketAddr,
+        id: usize,
+    ) -> Self {
+        Self {
+            channel_buffer,
+            addr,
+            id,
+        }
     }
 
     /// Returns the socket address.
@@ -126,7 +143,14 @@ impl NetReceiver {
 }
 
 impl AsyncRead for NetReceiver {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        unsafe { self.map_unchecked_mut(|v| &mut v.channel_buffer).poll_read(cx, buf) }
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        unsafe {
+            self.map_unchecked_mut(|v| &mut v.channel_buffer)
+                .poll_read(cx, buf)
+        }
     }
 }
