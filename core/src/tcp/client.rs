@@ -33,14 +33,13 @@ use crate::tcp::util::{DataMsg, Network, ReadyEvent};
 use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
 use bp3d_debug::{error, trace};
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::{mpsc, watch};
+use crate::util::barrier;
 
 /// The reader trait which is supposed to handle the actual data reading loop.
 pub trait Reader {
@@ -113,12 +112,11 @@ pub trait Factory {
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Client structure).
-async unsafe fn handle_data(msg: DataMsg, net: &mut Network) -> std::io::Result<()> {
+async unsafe fn handle_data(msg: barrier::mpsc::Lock<DataMsg>, net: &mut Network) -> std::io::Result<()> {
     trace!({?net} {?msg}, "Received data event");
     let slice = std::slice::from_raw_parts(msg.buffer, msg.buffer_size);
     net.write_all(slice).await?;
     net.flush().await?;
-    (*msg.synchro).add_permits(1);
     Ok(())
 }
 
@@ -169,13 +167,12 @@ impl<F: Factory> Builder<F> {
         let (request_sender, mut request_receiver) = mpsc::channel(self.event_queue_size);
         let (reply_sender, reply_receiver) = mpsc::channel(self.event_queue_size);
         let (exit_sender, mut exit_receiver) = watch::channel(());
-        let (data_sender, mut data_receiver) = mpsc::channel(self.event_queue_size);
+        let (data_sender, mut data_receiver) = barrier::mpsc::barrier(self.event_queue_size);
         let client = Arc::new(Client {
             exit: exit_sender,
             request_sender,
             reply_sender,
-            data: data_sender,
-            is_exiting: AtomicBool::new(false),
+            data: data_sender
         });
         let mut handler = self.factory.start(&client);
         let handle = tokio::spawn(async move {
@@ -200,7 +197,7 @@ impl<F: Factory> Builder<F> {
                     },
                     _ = exit_receiver.changed() => break,
                     Some(event) = request_receiver.recv() => handler.request(event, &mut net).await,
-                    Some(msg) = data_receiver.recv() => unsafe {
+                    Ok(msg) = data_receiver.recv() => unsafe {
                         handle_data(msg, &mut net).await?
                     }
                 }
@@ -222,15 +219,14 @@ impl<F: Factory> Builder<F> {
 pub struct Client<H: Handler> {
     exit: watch::Sender<()>,
     request_sender: mpsc::Sender<H::Request>,
-    data: mpsc::Sender<DataMsg>,
-    reply_sender: mpsc::Sender<H::Reply>,
-    is_exiting: AtomicBool,
+    data: barrier::mpsc::Sender<DataMsg>,
+    reply_sender: mpsc::Sender<H::Reply>
 }
 
 impl<H: Handler> Client<H> {
     /// Requests exit of the client.
     pub fn exit(&self) {
-        self.is_exiting.store(true, Relaxed);
+        self.data.close();
         let _ = self.exit.send(());
     }
 
@@ -287,29 +283,13 @@ impl<H: Handler> Client<H> {
     /// * `msg`: the message buffer to send.
     ///
     /// returns: true if the operation has succeeded, false otherwise.
-    pub async fn send(&self, msg: &[u8]) -> Result<(), crate::tcp::util::SendError> {
-        if self.is_exiting.load(Relaxed) {
-            return Err(crate::tcp::util::SendError::IsExiting);
-        }
-        // SAFETY: It is safe to pass a pointer to msg as long as we wait for all clients to have
-        // consumed the pointer before returning.
-        let synchro = Semaphore::new(0);
-        if (self
-            .data
-            .send(DataMsg {
-                synchro: &synchro,
-                buffer: msg.as_ptr(),
-                buffer_size: msg.len(),
-                net_id: 0,
-            })
-            .await)
-            .is_err()
-        {
-            return Err(crate::tcp::util::SendError::Closed);
-        }
-        trace!("Waiting for the async task to acknowledge");
-        let _ = synchro.acquire().await.unwrap();
-        Ok(())
+    pub async fn send(&self, msg: &[u8]) -> Result<(), barrier::Error> {
+        // SAFETY: It is safe to pass a pointer to msg thanks to the barrier synchronization.
+        self.data.send(DataMsg {
+            buffer: msg.as_ptr(),
+            buffer_size: msg.len(),
+            net_id: 0,
+        }).await
     }
 }
 

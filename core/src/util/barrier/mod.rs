@@ -26,13 +26,39 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![warn(missing_docs)]
+//! Synchronization barrier primitives.
 
-//! Network utilities using tokio async runtime for use in BP3D software.
+use std::fmt::Display;
+use tokio::sync::Semaphore;
 
-pub mod tcp;
+pub mod broadcast;
+pub mod mpsc;
 
-pub mod util;
+/// Represents the error type which can occur on a barrier synchronization primitive.
+#[derive(Debug)]
+pub enum Error {
+    /// The channel has been prematurely closed.
+    BrokenPipe,
 
-pub mod udp;
+    /// The channel was requested to be closed.
+    Closed
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::BrokenPipe => f.write_str("broken pipe"),
+            Error::Closed => f.write_str("closed")
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+#[derive(Clone)]
+struct Msg<T> {
+    synchro: *const Semaphore,
+    inner: T
+}
+
+unsafe impl<T: Send> Send for Msg<T> {}

@@ -26,11 +26,15 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! General network utilities.
+
 #[cfg(any(feature = "tcp-server", feature = "udp-server"))]
 mod server;
 
 #[cfg(any(feature = "tcp-client", feature = "udp-client"))]
 mod client;
+
+pub mod barrier;
 
 #[cfg(any(feature = "tcp-client", feature = "udp-client"))]
 pub use client::*;

@@ -38,13 +38,10 @@ use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-
 use crate::tcp::buffer::Bytes;
-use tokio::sync::Semaphore;
 
 #[derive(Clone, Debug)]
 pub(super) struct DataMsg {
-    pub(super) synchro: *const Semaphore,
     pub(super) buffer: *const u8,
     pub(super) buffer_size: usize,
     #[allow(dead_code)]

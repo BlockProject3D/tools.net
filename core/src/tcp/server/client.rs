@@ -33,9 +33,9 @@ use bp3d_debug::{error, trace};
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 use tokio::select;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use crate::util::barrier;
 
 /// Represents a client event handler.
 pub trait Handler {
@@ -64,7 +64,7 @@ pub(crate) struct ClientTask<'a, H> {
     pub(crate) net: &'a mut Network,
     pub(crate) handler: H,
     pub(crate) exit: watch::Receiver<()>,
-    pub(crate) broadcast: broadcast::Receiver<DataMsg>,
+    pub(crate) broadcast: barrier::broadcast::Receiver<DataMsg>,
 }
 
 impl<H: Handler + Send + 'static> ClientTask<'_, H> {
@@ -107,13 +107,12 @@ impl<H: Handler + Send + 'static> ClientTask<'_, H> {
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Server structure).
-async unsafe fn handle_broadcast(msg: DataMsg, net: &mut Network) -> std::io::Result<()> {
+async unsafe fn handle_broadcast(msg: barrier::broadcast::Lock<DataMsg>, net: &mut Network) -> std::io::Result<()> {
     trace!({?net} {?msg}, "Received broadcast event");
     if msg.net_id == 0 || msg.net_id == net.id() {
         let slice = std::slice::from_raw_parts(msg.buffer, msg.buffer_size);
         net.write_all(slice).await?;
         net.flush().await?;
     }
-    (*msg.synchro).add_permits(1);
     Ok(())
 }
