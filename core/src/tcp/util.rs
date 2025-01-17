@@ -29,7 +29,7 @@
 //! Utility module for TCP client or server.
 
 use bp3d_debug::warning;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::io::{Error, ErrorKind, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -49,27 +49,6 @@ pub(super) struct DataMsg {
 }
 
 unsafe impl Send for DataMsg {}
-
-/// An error type that can be thrown when sending or broadcasting to network clients.
-#[derive(Debug)]
-pub enum SendError {
-    /// The application was requested to exit.
-    IsExiting,
-
-    /// The broadcast channel is already closed.
-    Closed,
-}
-
-impl Display for SendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SendError::IsExiting => f.write_str("exit requested"),
-            SendError::Closed => f.write_str("channel closed"),
-        }
-    }
-}
-
-impl std::error::Error for SendError {}
 
 /// The event returned by the ready function in [Network].
 pub enum ReadyEvent {
