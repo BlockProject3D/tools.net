@@ -27,10 +27,10 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use bp3d_net::tcp::client::{Client, Factory, Handler, Reader};
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use bp3d_net::tcp::util::buffer::NetReceiver;
 use bp3d_net::tcp::util::net::Network;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[derive(Clone)]
 pub struct EchoClient {

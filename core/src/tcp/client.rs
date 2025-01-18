@@ -29,8 +29,10 @@
 //! A basic TCP client implementation designed for long-running connections.
 
 use crate::tcp::util::buffer::{ChannelBuffer, NetReceiver};
+use crate::tcp::util::net::{Network, ReadyEvent};
 use crate::tcp::util::DataMsg;
 use crate::tcp::BYTES_CHANNEL_SIZE;
+use crate::util::barrier;
 use bp3d_debug::{error, trace};
 use std::future::Future;
 use std::sync::Arc;
@@ -39,8 +41,6 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::{mpsc, watch};
-use crate::tcp::util::net::{Network, ReadyEvent};
-use crate::util::barrier;
 
 /// The reader trait which is supposed to handle the actual data reading loop.
 pub trait Reader {
@@ -113,7 +113,10 @@ pub trait Factory {
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Client structure).
-async unsafe fn handle_data(msg: barrier::mpsc::Lock<DataMsg>, net: &mut Network) -> std::io::Result<()> {
+async unsafe fn handle_data(
+    msg: barrier::mpsc::Lock<DataMsg>,
+    net: &mut Network,
+) -> std::io::Result<()> {
     trace!({?net} {?msg}, "Received data event");
     let slice = std::slice::from_raw_parts(msg.buffer, msg.buffer_size);
     net.write_all(slice).await?;
@@ -173,7 +176,7 @@ impl<F: Factory> Builder<F> {
             exit: exit_sender,
             request_sender,
             reply_sender,
-            data: data_sender
+            data: data_sender,
         });
         let mut handler = self.factory.start(&client);
         let handle = tokio::spawn(async move {
@@ -221,7 +224,7 @@ pub struct Client<H: Handler> {
     exit: watch::Sender<()>,
     request_sender: mpsc::Sender<H::Request>,
     data: barrier::mpsc::Sender<DataMsg>,
-    reply_sender: mpsc::Sender<H::Reply>
+    reply_sender: mpsc::Sender<H::Reply>,
 }
 
 impl<H: Handler> Client<H> {
@@ -286,11 +289,13 @@ impl<H: Handler> Client<H> {
     /// returns: true if the operation has succeeded, false otherwise.
     pub async fn send(&self, msg: &[u8]) -> Result<(), barrier::Error> {
         // SAFETY: It is safe to pass a pointer to msg thanks to the barrier synchronization.
-        self.data.send(DataMsg {
-            buffer: msg.as_ptr(),
-            buffer_size: msg.len(),
-            net_id: 0,
-        }).await
+        self.data
+            .send(DataMsg {
+                buffer: msg.as_ptr(),
+                buffer_size: msg.len(),
+                net_id: 0,
+            })
+            .await
     }
 }
 

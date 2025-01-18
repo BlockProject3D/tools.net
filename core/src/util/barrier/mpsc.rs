@@ -28,28 +28,28 @@
 
 //! A single-client barrier synchronization primitive.
 
+use crate::util::barrier::{Error, Msg};
+use bp3d_debug::trace;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::trace;
 use tokio::sync::{mpsc, Semaphore};
-use crate::util::barrier::{Error, Msg};
 
 /// Represents a single-client barrier lock.
 pub struct Lock<T> {
-    msg: Msg<T>
+    msg: Msg<T>,
 }
 
 /// Represents a single-client sender.
 pub struct Sender<T> {
     inner: mpsc::Sender<Msg<T>>,
-    closed: AtomicBool
+    closed: AtomicBool,
 }
 
 /// Represents a single-client receiver.
 pub struct Receiver<T> {
-    inner: mpsc::Receiver<Msg<T>>
+    inner: mpsc::Receiver<Msg<T>>,
 }
 
 impl<T> Deref for Lock<T> {
@@ -98,7 +98,7 @@ impl<T> Sender<T> {
         let semaphore = Semaphore::new(0);
         let msg = Msg {
             synchro: &semaphore,
-            inner: msg
+            inner: msg,
         };
         self.inner.send(msg).await.map_err(|_| Error::BrokenPipe)?;
         trace!("Waiting for client to acknowledge");
@@ -114,7 +114,11 @@ impl<T: Clone> Receiver<T> {
     ///
     /// This returns an [Error] if the channel was prematurely closed.
     pub async fn recv(&mut self) -> Result<Lock<T>, Error> {
-        self.inner.recv().await.ok_or(Error::BrokenPipe).map(|msg| Lock { msg })
+        self.inner
+            .recv()
+            .await
+            .ok_or(Error::BrokenPipe)
+            .map(|msg| Lock { msg })
     }
 }
 
@@ -127,5 +131,11 @@ impl<T: Clone> Receiver<T> {
 /// returns: (Sender<T>, Receiver<T>)
 pub fn barrier<T: Clone>(len: usize) -> (Sender<T>, Receiver<T>) {
     let (sender, receiver) = mpsc::channel(len);
-    (Sender { inner: sender, closed: AtomicBool::new(false) }, Receiver { inner: receiver })
+    (
+        Sender {
+            inner: sender,
+            closed: AtomicBool::new(false),
+        },
+        Receiver { inner: receiver },
+    )
 }

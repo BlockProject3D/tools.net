@@ -27,12 +27,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::tcp::server::client::ClientTask;
+use crate::tcp::util::net::Network;
 use crate::tcp::util::DataMsg;
+use crate::util::barrier;
 use bp3d_debug::{debug, trace};
 use std::future::Future;
 use std::net::Ipv4Addr;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
@@ -41,8 +43,6 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use crate::tcp::util::net::Network;
-use crate::util::barrier;
 
 /// A factory trait which can be used to create the instance of the main server event handler.
 pub trait Factory {
@@ -268,7 +268,7 @@ impl<F: Factory> Builder<F> {
             exit: exit_sender,
             max_clients: self.max_clients,
             cur_clients: AtomicUsize::new(0),
-            reply_sender
+            reply_sender,
         });
         let handler = self.factory.start(&server);
         let motherfuckingrust = server.clone();
@@ -297,7 +297,7 @@ pub struct Server<H: Handler> {
     cur_clients: AtomicUsize,
     max_clients: usize,
     request_sender: mpsc::Sender<H::Request>,
-    reply_sender: mpsc::Sender<H::Reply>
+    reply_sender: mpsc::Sender<H::Reply>,
 }
 
 impl<H: Handler> Server<H> {
@@ -373,11 +373,13 @@ impl<H: Handler> Server<H> {
     /// returns: true if the operation has succeeded, false otherwise.
     pub async fn send(&self, net_id: usize, msg: &[u8]) -> Result<(), barrier::Error> {
         // SAFETY: It is safe to pass a pointer to msg thanks to the barrier synchronization.
-        self.broadcast.send(DataMsg {
-            buffer: msg.as_ptr(),
-            buffer_size: msg.len(),
-            net_id
-        }).await?;
+        self.broadcast
+            .send(DataMsg {
+                buffer: msg.as_ptr(),
+                buffer_size: msg.len(),
+                net_id,
+            })
+            .await?;
         trace!("All clients have acknowledged");
         Ok(())
     }
@@ -391,11 +393,13 @@ impl<H: Handler> Server<H> {
     /// returns: true if the operation has succeeded, false otherwise.
     pub async fn broadcast(&self, msg: &[u8]) -> Result<(), barrier::Error> {
         // SAFETY: It is safe to pass a pointer to msg thanks to the barrier synchronization.
-        self.broadcast.send(DataMsg {
-            buffer: msg.as_ptr(),
-            buffer_size: msg.len(),
-            net_id: 0
-        }).await?;
+        self.broadcast
+            .send(DataMsg {
+                buffer: msg.as_ptr(),
+                buffer_size: msg.len(),
+                net_id: 0,
+            })
+            .await?;
         trace!("All clients have acknowledged");
         Ok(())
     }

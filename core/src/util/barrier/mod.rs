@@ -41,14 +41,14 @@ pub enum Error {
     BrokenPipe,
 
     /// The channel was requested to be closed.
-    Closed
+    Closed,
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::BrokenPipe => f.write_str("broken pipe"),
-            Error::Closed => f.write_str("closed")
+            Error::Closed => f.write_str("closed"),
         }
     }
 }
@@ -58,7 +58,7 @@ impl std::error::Error for Error {}
 #[derive(Clone)]
 struct Msg<T> {
     synchro: *const Semaphore,
-    inner: T
+    inner: T,
 }
 
 unsafe impl<T: Send> Send for Msg<T> {}

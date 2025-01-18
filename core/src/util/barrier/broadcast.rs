@@ -28,28 +28,28 @@
 
 //! A multi-client barrier synchronization primitive.
 
+use crate::util::barrier::{Error, Msg};
+use bp3d_debug::trace;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use bp3d_debug::trace;
 use tokio::sync::{broadcast, Semaphore};
-use crate::util::barrier::{Error, Msg};
 
 /// Represents a multi-client barrier lock.
 pub struct Lock<T> {
-    msg: Msg<T>
+    msg: Msg<T>,
 }
 
 /// Represents a multi-client sender.
 pub struct Sender<T> {
     inner: broadcast::Sender<Msg<T>>,
-    closed: AtomicBool
+    closed: AtomicBool,
 }
 
 /// Represents a multi-client receiver.
 pub struct Receiver<T> {
-    inner: broadcast::Receiver<Msg<T>>
+    inner: broadcast::Receiver<Msg<T>>,
 }
 
 impl<T> Deref for Lock<T> {
@@ -98,7 +98,7 @@ impl<T> Sender<T> {
         let semaphore = Semaphore::new(0);
         let msg = Msg {
             synchro: &semaphore,
-            inner: msg
+            inner: msg,
         };
         let count = self.inner.send(msg).map_err(|_| Error::BrokenPipe)?;
         trace!("Waiting for {} client(s) to acknowledge", count);
@@ -108,7 +108,9 @@ impl<T> Sender<T> {
 
     /// Creates and subscribes a new receiver to this sender.
     pub fn subscribe(&self) -> Receiver<T> {
-        Receiver { inner: self.inner.subscribe() }
+        Receiver {
+            inner: self.inner.subscribe(),
+        }
     }
 }
 
@@ -119,7 +121,11 @@ impl<T: Clone> Receiver<T> {
     ///
     /// This returns an [Error] if the channel was prematurely closed.
     pub async fn recv(&mut self) -> Result<Lock<T>, Error> {
-        self.inner.recv().await.map_err(|_| Error::BrokenPipe).map(|msg| Lock { msg })
+        self.inner
+            .recv()
+            .await
+            .map_err(|_| Error::BrokenPipe)
+            .map(|msg| Lock { msg })
     }
 }
 
@@ -132,5 +138,8 @@ impl<T: Clone> Receiver<T> {
 /// returns: Sender<T>
 pub fn barrier<T: Clone>(len: usize) -> Sender<T> {
     let (sender, _) = broadcast::channel(len);
-    Sender { inner: sender, closed: AtomicBool::new(false) }
+    Sender {
+        inner: sender,
+        closed: AtomicBool::new(false),
+    }
 }
