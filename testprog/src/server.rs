@@ -28,10 +28,10 @@
 
 use bp3d_debug::debug;
 use bp3d_net::tcp::server::{ClientHandler, Factory, Handler, Server};
-use bp3d_net::tcp::util::Network;
-use bp3d_net::tcp::NetReceiver;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use bp3d_net::tcp::util::buffer::NetReceiver;
+use bp3d_net::tcp::util::net::Network;
 
 pub struct EchoServer {
     server: Arc<Server<EchoServer>>,

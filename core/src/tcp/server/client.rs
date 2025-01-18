@@ -26,15 +26,16 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::tcp::buffer::ChannelBuffer;
-use crate::tcp::util::{DataMsg, Network, ReadyEvent};
-use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
+use crate::tcp::util::buffer::{ChannelBuffer, NetReceiver};
+use crate::tcp::util::DataMsg;
+use crate::tcp::BYTES_CHANNEL_SIZE;
 use bp3d_debug::{error, trace};
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use crate::tcp::util::net::{Network, ReadyEvent};
 use crate::util::barrier;
 
 /// Represents a client event handler.
@@ -77,7 +78,7 @@ impl<H: Handler + Send + 'static> ClientTask<'_, H> {
             if let Err(e) = self.handler.recv(&mut net).await {
                 error!({?net}, "Client error: {}", e);
             }
-            net.channel_buffer.close();
+            net.close();
             self.handler
         });
         loop {

@@ -38,7 +38,3 @@ pub mod client;
 pub mod server;
 
 pub mod util;
-
-mod buffer;
-//TODO: move to util
-pub use buffer::NetReceiver;

@@ -26,29 +26,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! Utility module for TCP client or server.
+//! TCP network stream async reader/writer tools.
 
-use bp3d_debug::warning;
 use std::fmt::{Debug, Formatter};
 use std::io::{Error, ErrorKind, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use bp3d_debug::warning;
 use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use crate::tcp::buffer::Bytes;
-
-#[derive(Clone, Debug)]
-pub(super) struct DataMsg {
-    pub(super) buffer: *const u8,
-    pub(super) buffer_size: usize,
-    #[allow(dead_code)]
-    pub(super) net_id: usize,
-}
-
-unsafe impl Send for DataMsg {}
+use crate::tcp::util::buffer::Bytes;
 
 /// The event returned by the ready function in [Network].
 pub enum ReadyEvent {

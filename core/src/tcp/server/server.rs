@@ -27,7 +27,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::tcp::server::client::ClientTask;
-use crate::tcp::util::{DataMsg, Network};
+use crate::tcp::util::DataMsg;
 use bp3d_debug::{debug, trace};
 use std::future::Future;
 use std::net::Ipv4Addr;
@@ -41,6 +41,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
+use crate::tcp::util::net::Network;
 use crate::util::barrier;
 
 /// A factory trait which can be used to create the instance of the main server event handler.

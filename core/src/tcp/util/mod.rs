@@ -26,51 +26,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use bp3d_net::tcp::client::{Client, Factory, Handler, Reader};
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use bp3d_net::tcp::util::buffer::NetReceiver;
-use bp3d_net::tcp::util::net::Network;
+//! Utility module for TCP client or server.
 
-#[derive(Clone)]
-pub struct EchoClient {
-    client: Arc<Client<EchoClient>>,
+pub mod net;
+pub mod buffer;
+
+use std::fmt::Debug;
+
+#[derive(Clone, Debug)]
+pub(super) struct DataMsg {
+    pub(super) buffer: *const u8,
+    pub(super) buffer_size: usize,
+    #[allow(dead_code)]
+    pub(super) net_id: usize,
 }
 
-impl Handler for EchoClient {
-    type Reader = EchoClient;
-    type Request = String;
-    type Reply = String;
-
-    async fn request(&mut self, event: Self::Request, net: &mut Network) {
-        net.write_all(event.as_bytes()).await.unwrap();
-        net.write_all(b"\n").await.unwrap();
-        net.flush().await.unwrap();
-    }
-
-    async fn connect(&mut self, _: &mut Network) -> std::io::Result<Self::Reader> {
-        Ok(self.clone())
-    }
-}
-
-impl Reader for EchoClient {
-    async fn recv(&mut self, net: &mut NetReceiver) -> std::io::Result<()> {
-        let mut buf = BufReader::new(net).lines();
-        while let Some(s) = buf.next_line().await? {
-            self.client.reply(s + "\n").await.unwrap();
-        }
-        Ok(())
-    }
-}
-
-pub struct EchoClientFactory;
-
-impl Factory for EchoClientFactory {
-    type Handler = EchoClient;
-
-    fn start(self, client: &Arc<Client<EchoClient>>) -> Self::Handler {
-        EchoClient {
-            client: client.clone(),
-        }
-    }
-}
+unsafe impl Send for DataMsg {}

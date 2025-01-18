@@ -28,9 +28,9 @@
 
 //! A basic TCP client implementation designed for long-running connections.
 
-use crate::tcp::buffer::ChannelBuffer;
-use crate::tcp::util::{DataMsg, Network, ReadyEvent};
-use crate::tcp::{NetReceiver, BYTES_CHANNEL_SIZE};
+use crate::tcp::util::buffer::{ChannelBuffer, NetReceiver};
+use crate::tcp::util::DataMsg;
+use crate::tcp::BYTES_CHANNEL_SIZE;
 use bp3d_debug::{error, trace};
 use std::future::Future;
 use std::sync::Arc;
@@ -39,6 +39,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::{mpsc, watch};
+use crate::tcp::util::net::{Network, ReadyEvent};
 use crate::util::barrier;
 
 /// The reader trait which is supposed to handle the actual data reading loop.
@@ -185,7 +186,7 @@ impl<F: Factory> Builder<F> {
                 if let Err(e) = reader.recv(&mut net).await {
                     error!({?net}, "Client error: {}", e);
                 }
-                net.channel_buffer.close();
+                net.close();
             });
             loop {
                 select! {

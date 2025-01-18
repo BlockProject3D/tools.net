@@ -26,6 +26,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! Async buffered receiver based on mpsc channels.
+
 use crate::tcp::BYTES_BUFFER_SIZE;
 use std::fmt::{Debug, Formatter};
 use std::io::{Error, ErrorKind};
@@ -36,12 +38,21 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::mpsc;
 
+/// A single buffer of bytes.
 pub struct Bytes<const N: usize> {
     bytes: [u8; N],
     size: usize,
 }
 
 impl<const N: usize> Bytes<N> {
+    /// Creates a new owned byte buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes`: the array of bytes to store.
+    /// * `size`: the number of valid bytes in the buffer.
+    ///
+    /// returns: Bytes<{ N }>
     pub fn new(bytes: [u8; N], size: usize) -> Self {
         Self { bytes, size }
     }
@@ -55,15 +66,24 @@ impl<const N: usize> Deref for Bytes<N> {
     }
 }
 
+/// The main async channel buffer.
 pub struct ChannelBuffer<const N: usize> {
     receiver: mpsc::Receiver<Bytes<N>>,
 }
 
 impl<const N: usize> ChannelBuffer<N> {
+    /// Creates a new [ChannelBuffer] by wrapping a mpsc channel.
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver`: the channel to wrap.
+    ///
+    /// returns: ChannelBuffer<{ N }>
     pub fn new(receiver: mpsc::Receiver<Bytes<N>>) -> Self {
         Self { receiver }
     }
 
+    /// Closes this [ChannelBuffer].
     pub fn close(mut self) {
         self.receiver.close();
     }
@@ -92,9 +112,9 @@ impl<const N: usize> AsyncRead for ChannelBuffer<N> {
     }
 }
 
-/// Represents a network receiver.
+/// Represents a network receiver which wraps a [ChannelBuffer].
 pub struct NetReceiver {
-    pub(super) channel_buffer: ChannelBuffer<BYTES_BUFFER_SIZE>,
+    channel_buffer: ChannelBuffer<BYTES_BUFFER_SIZE>,
     addr: SocketAddr,
     id: usize,
 }
@@ -139,6 +159,11 @@ impl NetReceiver {
     /// Returns the unique network ID.
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    /// Closes this [ChannelBuffer].
+    pub fn close(self) {
+        self.channel_buffer.close();
     }
 }
 
