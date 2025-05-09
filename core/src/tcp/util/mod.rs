@@ -28,8 +28,8 @@
 
 //! Utility module for TCP client or server.
 
-pub mod net;
 pub mod buffer;
+pub mod net;
 
 use std::fmt::Debug;
 

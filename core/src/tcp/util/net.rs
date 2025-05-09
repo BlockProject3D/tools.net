@@ -28,17 +28,17 @@
 
 //! TCP network stream async reader/writer tools.
 
+use crate::tcp::util::buffer::Bytes;
+use bp3d_debug::warning;
 use std::fmt::{Debug, Formatter};
 use std::io::{Error, ErrorKind, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use bp3d_debug::warning;
 use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use crate::tcp::util::buffer::Bytes;
 
 /// The event returned by the ready function in [Network].
 pub enum ReadyEvent {

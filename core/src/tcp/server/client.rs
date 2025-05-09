@@ -27,16 +27,16 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::tcp::util::buffer::{ChannelBuffer, NetReceiver};
+use crate::tcp::util::net::{Network, ReadyEvent};
 use crate::tcp::util::DataMsg;
 use crate::tcp::BYTES_CHANNEL_SIZE;
+use crate::util::barrier;
 use bp3d_debug::{error, trace};
 use std::future::Future;
 use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use crate::tcp::util::net::{Network, ReadyEvent};
-use crate::util::barrier;
 
 /// Represents a client event handler.
 pub trait Handler {
@@ -108,7 +108,10 @@ impl<H: Handler + Send + 'static> ClientTask<'_, H> {
 }
 
 /// SAFETY: DataMsg must point to valid memory (normally ensured by Server structure).
-async unsafe fn handle_broadcast(msg: barrier::broadcast::Lock<DataMsg>, net: &mut Network) -> std::io::Result<()> {
+async unsafe fn handle_broadcast(
+    msg: barrier::broadcast::Lock<DataMsg>,
+    net: &mut Network,
+) -> std::io::Result<()> {
     trace!({?net} {?msg}, "Received broadcast event");
     if msg.net_id == 0 || msg.net_id == net.id() {
         let slice = std::slice::from_raw_parts(msg.buffer, msg.buffer_size);
