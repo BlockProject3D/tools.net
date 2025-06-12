@@ -26,8 +26,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use bp3d_net::ipc::{Client, Server};
 use bp3d_net::ipc::util::Message;
+use bp3d_net::ipc::{Client, Server};
 
 #[tokio::test]
 async fn improper_terminate() {
@@ -71,7 +71,10 @@ async fn improper_terminate() {
         println!("client cycle: {}", duration.as_secs_f64());
     }
     let duration = time.elapsed();
-    println!("full client connect-send-recv cycle: {}", duration.as_secs_f64());
+    println!(
+        "full client connect-send-recv cycle: {}",
+        duration.as_secs_f64()
+    );
     handle.await.unwrap();
 }
 

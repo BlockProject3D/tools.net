@@ -30,9 +30,9 @@
 
 #[cfg(unix)]
 mod unix;
+pub mod util;
 #[cfg(windows)]
 mod windows;
-pub mod util;
 
 #[cfg(unix)]
 type ServerImpl = unix::Server;

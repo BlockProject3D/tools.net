@@ -26,12 +26,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions};
-use tokio::task::JoinHandle;
 use crate::ipc::util::Message;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::net::windows::named_pipe::{
+    ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions,
+};
+use tokio::task::JoinHandle;
 
 const INIT_SERVER_CONNECT: &[u8] = &[0xCD];
 const ACK: &[u8] = &[0xFF];
@@ -42,13 +44,16 @@ const MAX_FAILURES: usize = 2;
 #[derive(Debug)]
 pub struct Server {
     pipe: NamedPipeServer,
-    path: PathBuf
+    path: PathBuf,
 }
 
 impl Server {
     pub async fn create(name: &str) -> std::io::Result<Server> {
         let path = Path::new("\\\\.\\pipe\\").join(name);
-        let pipe = ServerOptions::new().first_pipe_instance(true).pipe_mode(PipeMode::Message).create(&path)?;
+        let pipe = ServerOptions::new()
+            .first_pipe_instance(true)
+            .pipe_mode(PipeMode::Message)
+            .create(&path)?;
         Ok(Self { pipe, path })
     }
 
@@ -64,35 +69,35 @@ impl Server {
 #[derive(Debug)]
 enum Pipe {
     Client(NamedPipeClient),
-    Server(NamedPipeServer)
+    Server(NamedPipeServer),
 }
 
 impl Pipe {
     async fn readable(&self) -> std::io::Result<()> {
         match self {
             Pipe::Client(v) => v.readable().await,
-            Pipe::Server(v) => v.readable().await
+            Pipe::Server(v) => v.readable().await,
         }
     }
 
     async fn writable(&self) -> std::io::Result<()> {
         match self {
             Pipe::Client(v) => v.writable().await,
-            Pipe::Server(v) => v.writable().await
+            Pipe::Server(v) => v.writable().await,
         }
     }
 
     fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Pipe::Client(v) => v.try_read(buf),
-            Pipe::Server(v) => v.try_read(buf)
+            Pipe::Server(v) => v.try_read(buf),
         }
     }
 
     fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
             Pipe::Client(v) => v.try_write(buf),
-            Pipe::Server(v) => v.try_write(buf)
+            Pipe::Server(v) => v.try_write(buf),
         }
     }
 
@@ -103,8 +108,8 @@ impl Pipe {
                 Ok(v) => return Ok(v),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => continue,
-                    _ => return Err(e)
-                }
+                    _ => return Err(e),
+                },
             }
         }
     }
@@ -116,8 +121,8 @@ impl Pipe {
                 Ok(v) => return Ok(v),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => continue,
-                    _ => return Err(e)
-                }
+                    _ => return Err(e),
+                },
             }
         }
     }
@@ -133,19 +138,25 @@ impl Pipe {
 #[derive(Debug)]
 pub struct ClientInner {
     pipe: Pipe,
-    failures: AtomicUsize
+    failures: AtomicUsize,
 }
 
 #[derive(Debug)]
 pub struct Client {
     inner: Arc<ClientInner>,
-    handle: JoinHandle<()>
+    handle: JoinHandle<()>,
 }
 
 impl Client {
     pub async fn open(name: &str) -> std::io::Result<Self> {
         let server_path = Path::new("\\\\.\\pipe\\").join(name);
-        let pipe = Pipe::Client(ClientOptions::new().pipe_mode(PipeMode::Message).read(true).write(true).open(&server_path)?);
+        let pipe = Pipe::Client(
+            ClientOptions::new()
+                .pipe_mode(PipeMode::Message)
+                .read(true)
+                .write(true)
+                .open(&server_path)?,
+        );
         let mut buf = [0];
         let size = pipe.recv(&mut buf).await?;
         if size != 1 || buf != INIT_SERVER_CONNECT {
@@ -157,7 +168,7 @@ impl Client {
     fn new(pipe: Pipe) -> Self {
         let inner = Arc::new(ClientInner {
             pipe,
-            failures: AtomicUsize::new(0)
+            failures: AtomicUsize::new(0),
         });
         let fuck = inner.clone();
         let handle = tokio::spawn(async move {
@@ -171,15 +182,15 @@ impl Client {
                 }
             }
         });
-        Self {
-            inner,
-            handle
-        }
+        Self { inner, handle }
     }
 
     fn check_dead(&self) -> std::io::Result<()> {
         if self.inner.failures.load(Ordering::SeqCst) >= MAX_FAILURES {
-            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "lost rx link"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "lost rx link",
+            ));
         }
         Ok(())
     }
@@ -193,7 +204,10 @@ impl Client {
         let len = self.inner.pipe.send(&msg.buffer[..msg.len + 1]).await?;
         if len == 0 {
             self.set_dead();
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "unexpected EOF",
+            ));
         }
         Ok(len - 1)
     }
@@ -202,14 +216,20 @@ impl Client {
         self.check_dead()?;
         msg.set_size(msg.max_size() + 1);
         loop {
-            let res = tokio::time::timeout(std::time::Duration::from_secs(2), async { self.inner.pipe.recv(msg).await }).await;
+            let res = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                self.inner.pipe.recv(msg).await
+            })
+            .await;
             match res {
                 Err(_) => {
                     let failures = self.inner.failures.fetch_add(1, Ordering::SeqCst);
                     if failures >= MAX_FAILURES {
-                        return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "lost rx link"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "lost rx link",
+                        ));
                     }
-                },
+                }
                 Ok(res) => {
                     self.inner.failures.store(0, Ordering::SeqCst);
                     let len = res?;
@@ -223,7 +243,10 @@ impl Client {
                         return Ok(());
                     } else if len == 0 {
                         self.set_dead();
-                        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "unexpected EOF",
+                        ));
                     }
                 }
             }
