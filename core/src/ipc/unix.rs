@@ -26,13 +26,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::ipc::util::Message;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::net::UnixDatagram;
 use tokio::task::JoinHandle;
-use crate::ipc::util::Message;
 
 const INIT_CLIENT_CONNECT: &[u8] = &[0xAB];
 const INIT_SERVER_CONNECT: &[u8] = &[0xCD];
@@ -46,7 +46,7 @@ pub struct Server {
     socket: UnixDatagram,
     dir: TempDir,
     num_clients: AtomicUsize,
-    path: PathBuf
+    path: PathBuf,
 }
 
 impl Server {
@@ -55,14 +55,21 @@ impl Server {
         let _ = tokio::fs::remove_file(&path).await;
         let socket = UnixDatagram::bind(&path)?;
         let dir = tempfile::tempdir()?;
-        Ok(Self { socket, dir, num_clients: AtomicUsize::new(0), path })
+        Ok(Self {
+            socket,
+            dir,
+            num_clients: AtomicUsize::new(0),
+            path,
+        })
     }
 
     pub async fn accept(&self) -> std::io::Result<Client> {
         let mut buf = [0; 1];
         let (len, tx) = self.socket.recv_from(&mut buf).await?;
-        let tx = tx.as_pathname()
-            .ok_or(std::io::Error::other("unable to establish tx link"))?.into();
+        let tx = tx
+            .as_pathname()
+            .ok_or(std::io::Error::other("unable to establish tx link"))?
+            .into();
         if len != 1 || buf != INIT_CLIENT_CONNECT {
             self.socket.send_to(END, &tx).await?;
             return Err(std::io::Error::other("rejected invalid client"));
@@ -89,13 +96,13 @@ pub struct ClientInner {
     // This is needed because this must not be dropped until ClientInner itself is dropped.
     #[allow(unused)]
     dir: Option<TempDir>,
-    failures: AtomicUsize
+    failures: AtomicUsize,
 }
 
 #[derive(Debug)]
 pub struct Client {
     inner: Arc<ClientInner>,
-    handle: JoinHandle<()>
+    handle: JoinHandle<()>,
 }
 
 impl Client {
@@ -110,8 +117,10 @@ impl Client {
         if size != 1 || buf != INIT_SERVER_CONNECT {
             return Err(std::io::Error::other("server rejected our connection"));
         }
-        let tx = tx.as_pathname()
-            .ok_or(std::io::Error::other("unable to establish tx link"))?.into();
+        let tx = tx
+            .as_pathname()
+            .ok_or(std::io::Error::other("unable to establish tx link"))?
+            .into();
         Ok(Self::new(rx, tx, Some(dir)))
     }
 
@@ -120,7 +129,7 @@ impl Client {
             rx,
             tx,
             dir,
-            failures: AtomicUsize::new(0)
+            failures: AtomicUsize::new(0),
         });
         let fuck = inner.clone();
         let handle = tokio::spawn(async move {
@@ -134,15 +143,15 @@ impl Client {
                 }
             }
         });
-        Self {
-            inner,
-            handle
-        }
+        Self { inner, handle }
     }
 
     fn check_dead(&self) -> std::io::Result<()> {
         if self.inner.failures.load(Ordering::SeqCst) >= MAX_FAILURES {
-            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "lost rx link"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "lost rx link",
+            ));
         }
         Ok(())
     }
@@ -153,10 +162,17 @@ impl Client {
 
     pub async fn send(&self, msg: &Message) -> std::io::Result<usize> {
         self.check_dead()?;
-        let len = self.inner.rx.send_to(&msg.buffer[..msg.len + 1], &self.inner.tx).await?;
+        let len = self
+            .inner
+            .rx
+            .send_to(&msg.buffer[..msg.len + 1], &self.inner.tx)
+            .await?;
         if len == 0 {
             self.set_dead();
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "unexpected EOF",
+            ));
         }
         Ok(len - 1)
     }
@@ -165,14 +181,20 @@ impl Client {
         self.check_dead()?;
         msg.set_size(msg.max_size() + 1);
         loop {
-            let res = tokio::time::timeout(std::time::Duration::from_secs(2), async { self.inner.rx.recv(msg).await }).await;
+            let res = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                self.inner.rx.recv(msg).await
+            })
+            .await;
             match res {
                 Err(_) => {
                     let failures = self.inner.failures.fetch_add(1, Ordering::SeqCst);
                     if failures >= MAX_FAILURES {
-                        return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "lost rx link"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "lost rx link",
+                        ));
                     }
-                },
+                }
                 Ok(res) => {
                     self.inner.failures.store(0, Ordering::SeqCst);
                     let len = res?;
@@ -186,7 +208,10 @@ impl Client {
                         return Ok(());
                     } else if len == 0 {
                         self.set_dead();
-                        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "unexpected EOF",
+                        ));
                     }
                 }
             }

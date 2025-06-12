@@ -34,7 +34,7 @@ use std::ops::{Deref, DerefMut};
 /// Represents an IPC message.
 pub struct Message {
     pub(super) buffer: Vec<u8>,
-    pub(super) len: usize
+    pub(super) len: usize,
 }
 
 impl Message {
@@ -48,7 +48,7 @@ impl Message {
     pub fn new(max_size: usize) -> Self {
         Self {
             buffer: vec![0; max_size + 1],
-            len: max_size
+            len: max_size,
         }
     }
 
