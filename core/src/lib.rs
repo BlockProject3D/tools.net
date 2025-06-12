@@ -36,3 +36,6 @@ pub mod tcp;
 pub mod util;
 
 pub mod udp;
+
+#[cfg(feature = "ipc")]
+pub mod ipc;

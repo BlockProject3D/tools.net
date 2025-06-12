@@ -15,9 +15,11 @@ categories = ["asynchronous", "network-programming"]
 [dependencies]
 bp3d-debug = "1.0.0-rc.6.1.0"
 tokio = { version = "1.42.0", features = ["net", "sync"] }
+tempfile = { version = "3.20.0", optional = true }
 
 [features]
 tcp-server = ["tokio/io-util", "tokio/macros", "tokio/rt"]
 tcp-client = ["tokio/io-util", "tokio/macros", "tokio/rt"]
 udp-server = ["tokio/macros", "tokio/rt"]
 udp-client = ["tokio/macros", "tokio/rt"]
+ipc = ["tokio/fs", "tempfile", "tokio/time", "tokio/rt"]
