@@ -51,8 +51,8 @@ async fn improper_terminate() {
             }
             let duration = time.elapsed();
             println!("server cycle: {}", duration.as_secs_f64());
-            assert!(!flag);
         }
+        assert!(!flag);
     });
     let time = std::time::Instant::now();
     {

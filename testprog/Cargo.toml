@@ -5,6 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-bp3d-net = { version = "1.0.0-rc.1.0.0", path = "../core", features = ["tcp-server", "tcp-client", "udp-client", "udp-server", "ipc"] }
+bp3d-net = { version = "1.0.0-rc.2.1.1", path = "../core", features = ["tcp-server", "tcp-client", "udp-client", "udp-server", "ipc"] }
 tokio = { version = "1.42.0", features = ["full"] }
 bp3d-debug = "1.0.0-rc.6.1.0"

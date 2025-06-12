@@ -129,7 +129,7 @@ impl Client {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                if let Err(_) = fuck.rx.send_to(ACK, &fuck.tx).await {
+                if fuck.rx.send_to(ACK, &fuck.tx).await.is_err() {
                     break;
                 }
             }

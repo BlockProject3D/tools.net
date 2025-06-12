@@ -29,6 +29,8 @@
 //! A multi-client TCP server implementation designed for long-running connections.
 
 mod client;
+
+#[allow(clippy::module_inception)]
 mod server;
 
 pub use client::Handler as ClientHandler;
