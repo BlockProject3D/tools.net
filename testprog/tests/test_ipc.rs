@@ -31,13 +31,19 @@ use bp3d_net::ipc::util::Message;
 
 #[tokio::test]
 async fn improper_terminate() {
-    let server = Server::create("_my_test_ipc_server_").await.unwrap();
+    let mut server = Server::create("_my_test_ipc_server_").await.unwrap();
     let handle = tokio::spawn(async move {
         let client = server.accept().await.unwrap();
         let mut msg = Message::new(256);
+        let mut flag = false;
         loop {
             let time = std::time::Instant::now();
             if let Err(_) = client.recv(&mut msg).await {
+                break;
+            }
+            if msg.len() == 0 {
+                println!("Nominal client disconnect");
+                flag = true;
                 break;
             }
             if let Err(_) = client.send(&msg).await {
@@ -45,6 +51,7 @@ async fn improper_terminate() {
             }
             let duration = time.elapsed();
             println!("server cycle: {}", duration.as_secs_f64());
+            assert!(!flag);
         }
     });
     let time = std::time::Instant::now();
@@ -70,18 +77,25 @@ async fn improper_terminate() {
 
 #[tokio::test]
 async fn basic() {
-    let server = Server::create("_my_test_ipc_server_1_").await.unwrap();
+    let mut server = Server::create("_my_test_ipc_server_1_").await.unwrap();
     let handle = tokio::spawn(async move {
         let client = server.accept().await.unwrap();
         let mut msg = Message::new(256);
+        let mut flag = false;
         loop {
             if let Err(_) = client.recv(&mut msg).await {
+                break;
+            }
+            if msg.len() == 0 {
+                println!("Nominal client disconnect");
+                flag = true;
                 break;
             }
             if let Err(_) = client.send(&msg).await {
                 break;
             }
         }
+        assert!(flag);
         client.close().await.unwrap();
     });
     let client = Client::open("_my_test_ipc_server_1_").await.unwrap();

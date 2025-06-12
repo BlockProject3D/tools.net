@@ -30,12 +30,19 @@
 
 #[cfg(unix)]
 mod unix;
+#[cfg(windows)]
+mod windows;
 pub mod util;
 
 #[cfg(unix)]
 type ServerImpl = unix::Server;
 #[cfg(unix)]
 type ClientImpl = unix::Client;
+
+#[cfg(windows)]
+type ServerImpl = windows::Server;
+#[cfg(windows)]
+type ClientImpl = windows::Client;
 
 /// Represents an IPC Server.
 #[derive(Debug)]
@@ -65,7 +72,7 @@ impl Server {
     }
 
     /// Accepts a new client.
-    pub async fn accept(&self) -> std::io::Result<Client> {
+    pub async fn accept(&mut self) -> std::io::Result<Client> {
         self.0.accept().await.map(Client)
     }
 }
