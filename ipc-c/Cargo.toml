@@ -1,0 +1,20 @@
+[package]
+name = "bp3d-net-ipc-c"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bp3d-net = { version = "1.0.0-rc.2.1.1", path = "../core", features = ["ipc"] }
+tokio = { version = "1.45.1", features = ["full"] }
+
+# This project is built separately as it's usually packaged through bp3d-package.
+[workspace]
+
+[bp3d-package]
+name = "BP3DNetIPCC"
+includes = "include/BP3DNetIPCC"
+identifier = "com.github.bp3d.tools.net.ipc"
