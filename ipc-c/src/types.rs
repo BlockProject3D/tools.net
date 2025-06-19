@@ -58,14 +58,6 @@ impl<T1> Callback<extern "C" fn(*mut c_void, T1)> {
     }
 }
 
-impl<T1, T2> Callback<extern "C" fn(*mut c_void, T1, T2)> {
-    pub fn call(&self, arg1: T1, arg2: T2) {
-        if let Some(f) = self.f {
-            f(self.udata as _, arg1, arg2);
-        }
-    }
-}
-
 impl<T1, T2, T3> Callback<extern "C" fn(*mut c_void, T1, T2, T3)> {
     pub fn call(&self, arg1: T1, arg2: T2, arg3: T3) {
         if let Some(f) = self.f {
