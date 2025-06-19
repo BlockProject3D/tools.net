@@ -33,3 +33,4 @@
 mod types;
 mod server;
 mod core;
+mod client;

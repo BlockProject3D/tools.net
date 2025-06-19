@@ -27,6 +27,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi::{c_char, c_void};
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
 use bp3d_net::ipc::Client;
 use bp3d_net::ipc::util::Message;
@@ -34,12 +35,13 @@ use bp3d_net::ipc::util::Message;
 pub struct ClientWrapper {
     pub client: Client,
     pub send_msg: Mutex<Message>,
+    pub eject: AtomicBool,
 }
 
 type ConnectFn = extern "C" fn(*mut c_void, *const ClientWrapper);
 type DisconnectFn = extern "C" fn(*mut c_void, *const ClientWrapper);
 type RecvFn = extern "C" fn(*mut c_void, *const ClientWrapper, *const u8, usize);
-type ErrorFn = extern "C" fn(*mut c_void, *const ClientWrapper, msg: *const c_char);
+type ErrorFn = extern "C" fn(*mut c_void, *const ClientWrapper, bool, msg: *const c_char);
 
 #[derive(Copy, Clone)]
 #[repr(C)]

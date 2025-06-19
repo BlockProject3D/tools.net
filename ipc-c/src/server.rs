@@ -28,6 +28,8 @@
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use bp3d_net::ipc::Server;
@@ -36,8 +38,8 @@ use crate::core::CorePtr;
 use crate::types::ClientWrapper;
 
 fn client_loop(wrapper: Arc<ClientWrapper>, core: CorePtr) -> JoinHandle<std::io::Result<()>> {
-    let mut barrier = core.barrier().subscribe();
     tokio::spawn(async move {
+        let mut barrier = core.barrier().subscribe();
         let mut msg = Message::new(core.configuration().packet_size);
         loop {
             tokio::select! {
@@ -48,6 +50,9 @@ fn client_loop(wrapper: Arc<ClientWrapper>, core: CorePtr) -> JoinHandle<std::io
                         break;
                     }
                     core.configuration().recv_callback.call(Arc::as_ptr(&wrapper), msg.as_ptr(), msg.len());
+                    if wrapper.eject.load(SeqCst) {
+                        break;
+                    }
                 },
                 _ = barrier.recv() => break
             }
@@ -60,8 +65,8 @@ async fn client_loop_detached(handle: JoinHandle<std::io::Result<()>>, wrapper: 
     match handle.await? {
         Ok(()) => core.configuration().disconnect_callback.call(Arc::as_ptr(&wrapper)),
         Err(err) => {
-            let msg = CString::new(err.to_string())?;
-            core.configuration().error_callback.call(Arc::as_ptr(&wrapper), msg.as_ptr());
+            let msg = CString::new(err.to_string()).expect("invalid io error, this is a bug!");
+            core.configuration().error_callback.call(Arc::as_ptr(&wrapper), true, msg.as_ptr());
         }
     }
     let ptr = Arc::try_unwrap(wrapper).map_err(|_| ()).expect("Did client loop not terminate? This is a bug!");
@@ -81,14 +86,15 @@ async fn server_main(core: CorePtr, name: String) -> std::io::Result<()> {
         msg.set_size(0);
         let wrapper = Arc::new(ClientWrapper {
             client,
-            send_msg: Mutex::new(msg)
+            send_msg: Mutex::new(msg),
+            eject: AtomicBool::new(false),
         });
         core.client_connect();
         let handle = client_loop(wrapper.clone(), core);
         tokio::spawn(async move {
             if let Err(err) = client_loop_detached(handle, wrapper, core).await {
                 let msg = CString::new(err.to_string()).unwrap();
-                core.configuration().error_callback.call(std::ptr::null(), msg.as_ptr());
+                core.configuration().error_callback.call(std::ptr::null(), false, msg.as_ptr());
             }
             core.client_disconnect();
         });
@@ -107,8 +113,8 @@ pub extern "C" fn bp3d_net_ipc_listen(core: CorePtr, name: *const c_char) {
     let name: String = name.to_string_lossy().into();
     tokio::spawn(async move {
         if let Err(err) = server_main(core, name).await {
-            let msg = CString::new(err.to_string()).unwrap();
-            core.configuration().error_callback.call(std::ptr::null(), msg.as_ptr());
+            let msg = CString::new(err.to_string()).expect("invalid io error, this is a bug!");
+            core.configuration().error_callback.call(std::ptr::null(), false, msg.as_ptr());
         }
     });
 }
