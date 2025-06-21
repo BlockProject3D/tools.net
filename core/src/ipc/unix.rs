@@ -51,7 +51,8 @@ pub struct Server {
 
 impl Server {
     pub async fn create(name: &str) -> std::io::Result<Self> {
-        let path = Path::new("/tmp").join(name);
+        let tmp_path = std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+        let path = tmp_path.join(name);
         let _ = tokio::fs::remove_file(&path).await;
         let socket = UnixDatagram::bind(&path)?;
         let dir = tempfile::tempdir()?;
