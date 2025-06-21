@@ -90,6 +90,7 @@ async fn server_main(core: CorePtr, name: String) -> std::io::Result<()> {
             eject: AtomicBool::new(false),
         });
         core.client_connect();
+        core.configuration().connect_callback.call(Arc::as_ptr(&wrapper));
         let handle = client_loop(wrapper.clone(), core);
         tokio::spawn(async move {
             if let Err(err) = client_loop_detached(handle, wrapper, core).await {
