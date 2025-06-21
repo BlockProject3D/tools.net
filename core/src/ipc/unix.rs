@@ -109,7 +109,8 @@ pub struct Client {
 impl Client {
     pub async fn open(name: &str) -> std::io::Result<Self> {
         let dir = tempfile::tempdir()?;
-        let server_path = Path::new("/tmp").join(name);
+        let tmp_path = std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+        let server_path = tmp_path.join(name);
         let client_path = dir.path().join("client");
         let rx = UnixDatagram::bind(client_path)?;
         rx.send_to(INIT_CLIENT_CONNECT, server_path).await?;
