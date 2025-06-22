@@ -122,6 +122,7 @@ pub extern "C" fn bp3d_net_ipc_client_eject(client: ClientPtr) {
 #[unsafe(no_mangle)]
 pub extern "C" fn bp3d_net_ipc_client_send(core: CorePtr, client: ClientPtr, data: *const u8, size: usize) {
     assert!(client.is_valid());
+    let _guard = core.runtime().enter();
     let client = unsafe { Arc::from_raw(client.0) };
     {
         let mut dst_msg = client.send_msg.blocking_lock();
