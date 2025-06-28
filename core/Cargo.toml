@@ -1,6 +1,6 @@
 [package]
 name = "bp3d-net"
-version = "1.0.0-rc.2.1.1"
+version = "1.0.0-rc.2.1.2"
 authors = ["Yuri Edward <yuri6037@outlook.com>"]
 edition = "2021"
 description = "Network utilities."
