@@ -51,7 +51,9 @@ pub struct Server {
 
 impl Server {
     pub async fn create(name: &str) -> std::io::Result<Self> {
-        let tmp_path = std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+        let tmp_path = std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or(PathBuf::from("/tmp"));
         let path = tmp_path.join(name);
         let _ = tokio::fs::remove_file(&path).await;
         let socket = UnixDatagram::bind(&path)?;
@@ -109,7 +111,9 @@ pub struct Client {
 impl Client {
     pub async fn open(name: &str) -> std::io::Result<Self> {
         let dir = tempfile::tempdir()?;
-        let tmp_path = std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+        let tmp_path = std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or(PathBuf::from("/tmp"));
         let server_path = tmp_path.join(name);
         let client_path = dir.path().join("client");
         let rx = UnixDatagram::bind(client_path)?;
